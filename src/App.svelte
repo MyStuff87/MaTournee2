@@ -8,16 +8,27 @@
   import Prepare from './screens/Prepare.svelte';
   import Guide from './screens/Guide.svelte';
   import Libre from './screens/Libre.svelte';
+  import Login from './screens/Login.svelte';
+  import { sessionValid } from './lib/auth';
 
   let ready = $state(false);
+  let unlocked = $state(sessionValid());
   onMount(async () => {
     await initApp();
     persist();
     ready = true;
   });
+  // Session expirée pendant que l'appli dormait : on redemande l'accès au retour.
+  // (sauf pendant une tournée ou un enregistrement en cours)
+  document.addEventListener('visibilitychange', () => {
+    const busy = app.screen.name === 'guide' || app.screen.name === 'record';
+    if (document.visibilityState === 'visible' && !busy && !sessionValid()) unlocked = false;
+  });
 </script>
 
-{#if ready}
+{#if ready && !unlocked}
+  <Login onDone={() => (unlocked = true)} />
+{:else if ready}
   {#key app.screen}
     {#if app.screen.name === 'home'}
       <Home />

@@ -5,6 +5,7 @@
   import { onMount } from 'svelte';
   import type { LL } from '../lib/geo';
   import type { Dot } from '../lib/types';
+  import { TILE_URL } from '../lib/tiles';
 
 
   interface Props {
@@ -36,7 +37,7 @@
     map = L.map(el, { zoomControl: false, attributionControl: false }).setView([46.6, 2.4], 6);
     L.control.attribution({ prefix: false, position: 'topleft' }).addTo(map);
     L.tileLayer(
-      'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/png&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
+      TILE_URL,
       { maxNativeZoom: 19, maxZoom: 20, attribution: '© IGN' },
     ).addTo(map);
     line = L.polyline([], { color: '#1b4c9c', weight: 6, opacity: 0.85, lineCap: 'round', lineJoin: 'round' }).addTo(map);

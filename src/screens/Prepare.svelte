@@ -6,6 +6,7 @@
   import type { Addr, DaySession, Segment, Tournee } from '../lib/types';
   import Plaque from '../components/Plaque.svelte';
   import SidePill from '../components/SidePill.svelte';
+  import { prefetchTiles } from '../lib/tiles';
 
   let { tourneeId }: { tourneeId: string } = $props();
   let t = $state<Tournee | null>(null);
@@ -18,7 +19,10 @@
     const key = `${tourneeId}|${today()}`;
     session = (await getSession(key)) ?? { key, tourneeId, date: today(), checked: [], done: [] };
     checked = new Set(session.checked);
+    prefetchTiles($state.snapshot(t) as Tournee, (d, n) => (tiles = { d, n }));
   });
+
+  let tiles = $state<{ d: number; n: number } | null>(null);
 
   // Chaque adresse n'apparaît qu'une fois, dans son premier tronçon.
   const sections = $derived.by(() => {
@@ -78,7 +82,13 @@
   </div>
   <div>
     <h1 class="title">Qui a du courrier ?</h1>
-    <p class="sub">Touche les numéros à servir aujourd'hui.</p>
+    <p class="sub">Touche les numéros à servir aujourd'hui, ou pars directement pour tout faire.</p>
+    {#if tiles}
+      <p class="offline sub">
+        <span class="o-dot" class:ok={tiles.d >= tiles.n}></span>
+        {tiles.d >= tiles.n ? 'Carte disponible hors-ligne' : `Carte hors-ligne : ${Math.round((tiles.d / tiles.n) * 100)} %`}
+      </p>
+    {/if}
   </div>
 
   {#each sections as { seg, addrs }, i (seg.id)}
@@ -111,6 +121,22 @@
 <style>
   .prep {
     padding-bottom: calc(var(--safe-bottom) + 110px);
+  }
+  .offline {
+    margin-top: 8px;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    font-size: 14px;
+  }
+  .o-dot {
+    width: 9px;
+    height: 9px;
+    border-radius: 50%;
+    background: var(--yellow);
+  }
+  .o-dot.ok {
+    background: var(--ok);
   }
   .chip-btn {
     height: 40px;

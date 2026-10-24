@@ -1,8 +1,11 @@
-// Guidage pendant la tournée : prochain arrêt, avance automatique.
+// Guidage pendant la tournée : tout est automatique.
+// Un arrêt est « fait » quand on est passé devant puis qu'on s'en éloigne ;
+// les arrêts précédents encore en attente sont alors considérés faits aussi.
 import type { Addr, Mode, Tournee } from './types';
 import { dist, type LL } from './geo';
 
-const ARRIVE: Record<Mode, number> = { pied: 15, velo: 20, voiture: 28 };
+const ARRIVE: Record<Mode, number> = { pied: 16, velo: 20, voiture: 28 };
+const LOOKAHEAD = 6;
 
 /** Liste ordonnée des arrêts du jour (toutes les adresses si rien n'est coché). */
 export function stopsFor(t: Tournee, checked: Set<string>): Addr[] {
@@ -20,36 +23,31 @@ export function stopsFor(t: Tournee, checked: Set<string>): Addr[] {
 }
 
 export class Guide {
-  /** distance minimale atteinte pour l'arrêt courant */
-  private minD = Infinity;
-  private arrived = false;
-  private currentId: string | null = null;
+  private reached = new Map<string, number>(); // id -> distance mini atteinte
 
   constructor(private mode: Mode) {}
 
   /**
-   * Renvoie l'id de l'arrêt à marquer comme livré automatiquement,
-   * quand on est passé devant puis qu'on s'en éloigne.
+   * @param pending arrêts restants, dans l'ordre
+   * @returns ids à marquer comme faits
    */
-  onFix(p: LL, current: Addr | null, next: Addr | null): string | null {
-    if (!current) return null;
-    if (current.id !== this.currentId) {
-      this.currentId = current.id;
-      this.minD = Infinity;
-      this.arrived = false;
-    }
+  onFix(p: LL, pending: Addr[]): string[] {
     const r = ARRIVE[this.mode];
-    const d = dist(p, current);
-    this.minD = Math.min(this.minD, d);
-    if (d <= r) this.arrived = true;
-    // Passé devant et reparti.
-    if (this.arrived && d > r * 1.6 && d > this.minD + 8) return current.id;
-    // Déjà devant le suivant (cas des boîtes très proches).
-    if (this.arrived && next && dist(p, next) < Math.min(d, r * 0.6)) return current.id;
-    return null;
+    const window = pending.slice(0, LOOKAHEAD);
+    let doneUpTo = -1;
+    window.forEach((a, i) => {
+      const d = dist(p, a);
+      const prev = this.reached.get(a.id);
+      if (d <= r) this.reached.set(a.id, Math.min(prev ?? Infinity, d));
+      else if (prev !== undefined && d > r * 1.6 && d > prev + 8) doneUpTo = i;
+    });
+    if (doneUpTo < 0) return [];
+    const ids = window.slice(0, doneUpTo + 1).map((a) => a.id);
+    for (const id of ids) this.reached.delete(id);
+    return ids;
   }
 
-  reset() {
-    this.currentId = null;
+  forget(id: string) {
+    this.reached.delete(id);
   }
 }

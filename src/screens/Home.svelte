@@ -3,6 +3,7 @@
   import { app, go, setCurrent, toast } from '../lib/app.svelte';
   import { listTournees } from '../lib/db';
   import { exportTournees, importFile } from '../lib/backup';
+  import { logout } from '../lib/auth';
   import type { Tournee } from '../lib/types';
   import Plaque from '../components/Plaque.svelte';
 
@@ -134,6 +135,7 @@
       <button class="link" onclick={() => exportTournees()}>Sauvegarder mes tournées</button>
     {/if}
     <button class="link" onclick={() => fileInput.click()}>Importer une tournée</button>
+    <button class="link" onclick={() => { logout(); location.reload(); }}>Se déconnecter</button>
     <input bind:this={fileInput} type="file" accept=".json,application/json" class="sr-only" onchange={onImport} />
   </footer>
 </main>
