@@ -1,0 +1,61 @@
+export type Side = 'pair' | 'impair' | 'both';
+export type Mode = 'pied' | 'velo' | 'voiture';
+
+/** Une adresse de la Base Adresse Nationale. */
+export interface Addr {
+  id: string;
+  num: number;
+  rep: string; // "bis", "ter", "A"…
+  street: string; // "Rue Victor Hugo"
+  streetKey: string; // code INSEE + nom normalisé
+  insee: string;
+  city: string;
+  lat: number;
+  lon: number;
+}
+
+export interface Segment {
+  id: string;
+  streetKey: string;
+  street: string;
+  city: string;
+  side: Side;
+  /** adresses dans l'ordre de passage */
+  addrIds: string[];
+}
+
+export interface Tournee {
+  id: string;
+  name: string;
+  mode: Mode;
+  createdAt: number;
+  updatedAt: number;
+  segments: Segment[];
+  addrs: Record<string, Addr>;
+  /** tracé enregistré */
+  track: { lat: number; lon: number }[];
+}
+
+/** État d'une journée de distribution. */
+export interface DaySession {
+  key: string; // tourneeId + date
+  tourneeId: string;
+  date: string;
+  checked: string[]; // adresses avec courrier
+  done: string[]; // adresses livrées
+  skipped?: string[]; // adresses passées sans livrer
+}
+
+export interface Fix {
+  lat: number;
+  lon: number;
+  acc: number;
+  t: number;
+  speed?: number | null;
+}
+
+export interface Dot {
+  lat: number;
+  lon: number;
+  kind: 'on' | 'off' | 'next' | 'done';
+}
