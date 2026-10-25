@@ -9,11 +9,16 @@
 
   let tournees = $state<Tournee[]>([]);
   let loaded = $state(false);
-  let picking = $state(false);
   let fileInput: HTMLInputElement;
 
   const current = $derived(tournees.find((t) => t.id === app.currentTourneeId) ?? tournees[0]);
-  const others = $derived(tournees.filter((t) => t !== current));
+  // La dernière tournée utilisée en premier, puis les autres.
+  const ordered = $derived(current ? [current, ...tournees.filter((t) => t !== current)] : tournees);
+
+  function start(t: Tournee) {
+    setCurrent(t.id);
+    go({ name: 'prepare', tourneeId: t.id });
+  }
 
   const dateLabel = new Date().toLocaleDateString('fr-FR', { weekday: 'long', day: 'numeric', month: 'long' });
   const hello = new Date().getHours() >= 18 ? 'Bonsoir' : 'Bonjour';
@@ -30,11 +35,6 @@
   }
   onMount(refresh);
 
-  function choose(t: Tournee) {
-    setCurrent(t.id);
-    picking = false;
-  }
-
   async function onImport(e: Event) {
     const f = (e.target as HTMLInputElement).files?.[0];
     if (!f) return;
@@ -48,10 +48,6 @@
     fileInput.value = '';
   }
 
-  function splitName(name: string) {
-    const m = name.match(/^(tourn[ée]e\s*\d+)[\s,–-]+(.+)$/i);
-    return m ? { main: m[1], sub: m[2] } : { main: name, sub: undefined };
-  }
 </script>
 
 <main class="screen">
@@ -60,35 +56,22 @@
     <h1 class="title">{hello}</h1>
   </header>
 
-  {#if loaded && current}
-    {@const s = stats(current)}
-    {@const n = splitName(current.name)}
-    <section class="card hero">
-      <div class="row">
-        <p class="sub">Ta tournée</p>
-        <span class="spacer"></span>
-        {#if tournees.length > 1}
-          <button class="link" onclick={() => (picking = !picking)}>{picking ? 'Fermer' : 'Changer'}</button>
-        {/if}
-      </div>
-      {#if picking}
-        <div class="pick">
-          {#each tournees as t (t.id)}
-            <button class="pick-row" class:sel={t === current} onclick={() => choose(t)}>
-              <span>{t.name}</span><span class="sub">{stats(t).addrs} adr.</span>
+  {#if loaded && tournees.length}
+    <section class="list" aria-label="Mes tournées">
+      <h2 class="list-h cond">{tournees.length > 1 ? 'Choisis ta tournée' : 'Ta tournée'}</h2>
+      {#each ordered as t (t.id)}
+        {@const s = stats(t)}
+        <article class="card tcard" class:last={t.id === current?.id && tournees.length > 1}>
+          <Plaque text={t.name} size="s" upper />
+          <p class="sub meta">{s.addrs} adresses, {s.rues} rue{s.rues > 1 ? 's' : ''}, {modeLabel[t.mode].toLowerCase()}</p>
+          <div class="row">
+            <button class="btn btn-primary grow" onclick={() => start(t)}>Préparer la journée</button>
+            <button class="btn btn-ghost edit" aria-label="Modifier {t.name}" onclick={() => { setCurrent(t.id); go({ name: 'review', tourneeId: t.id }); }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="M13.5 6.5l4 4" /></svg>
             </button>
-          {/each}
-        </div>
-      {:else}
-        <Plaque text={n.main} sub={n.sub} size="l" upper />
-        <div class="stats">
-          <div><span class="big cond">{s.addrs}</span><span class="sub">adresses</span></div>
-          <div><span class="big cond">{s.rues}</span><span class="sub">rues</span></div>
-          <div><span class="big cond">{modeLabel[current.mode]}</span><span class="sub">mode</span></div>
-        </div>
-        <button class="btn btn-primary" onclick={() => go({ name: 'prepare', tourneeId: current.id })}>Préparer la journée</button>
-        <button class="link edit" onclick={() => go({ name: 'review', tourneeId: current.id })}>Voir et modifier la tournée</button>
-      {/if}
+          </div>
+        </article>
+      {/each}
     </section>
   {:else if loaded}
     <section class="card hero empty">
@@ -113,22 +96,10 @@
       <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--impair)" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" fill="var(--impair)" /></svg>
       <span class="tile-t">
         <span class="cond tile-h">Enregistrer</span>
-        <span class="sub small">Une tournée à vide</span>
+        <span class="sub small">Une nouvelle tournée</span>
       </span>
     </button>
   </div>
-
-  {#if others.length}
-    <section class="list">
-      <h2 class="sub small list-h">Mes autres tournées</h2>
-      {#each others as t (t.id)}
-        <button class="list-row" onclick={() => choose(t)}>
-          <span class="name">{t.name}</span>
-          <span class="sub small">{stats(t).addrs} adr.</span>
-        </button>
-      {/each}
-    </section>
-  {/if}
 
   <footer class="foot">
     {#if tournees.length}
@@ -156,20 +127,6 @@
     gap: 16px;
     border-radius: 24px;
   }
-  .stats {
-    display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 8px;
-  }
-  .stats div {
-    display: flex;
-    flex-direction: column;
-  }
-  .big {
-    font-weight: 700;
-    font-size: 30px;
-    line-height: 1;
-  }
   .small {
     font-size: 14px;
   }
@@ -181,33 +138,6 @@
     font-weight: 700;
     font-size: 28px;
     line-height: 1.1;
-  }
-  .pick {
-    display: flex;
-    flex-direction: column;
-    gap: 8px;
-  }
-  .pick-row,
-  .list-row {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    gap: 10px;
-    min-height: 60px;
-    padding: 0 18px;
-    border-radius: 16px;
-    border: 0;
-    background: var(--card);
-    text-align: left;
-    font-weight: 600;
-    font-size: 17px;
-  }
-  .pick-row {
-    background: var(--ground);
-    border: 2px solid transparent;
-  }
-  .pick-row.sel {
-    border-color: var(--email);
   }
   .tiles {
     display: grid;
@@ -246,12 +176,30 @@
   }
   .list-h {
     margin-left: 4px;
-    font-weight: 500;
+    font-weight: 700;
+    font-size: 24px;
   }
-  .name {
-    overflow: hidden;
-    text-overflow: ellipsis;
-    white-space: nowrap;
+  .tcard {
+    display: flex;
+    flex-direction: column;
+    gap: 12px;
+    border: 3px solid transparent;
+  }
+  .tcard.last {
+    border-color: var(--yellow);
+  }
+  .meta {
+    font-size: 15px;
+  }
+  .grow {
+    flex: 1;
+  }
+  .edit {
+    width: 66px;
+    min-height: 66px;
+    padding: 0;
+    border-radius: 20px;
+    flex: none;
   }
   .foot {
     margin-top: auto;
