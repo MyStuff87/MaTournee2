@@ -52,7 +52,7 @@
     position = null,
     heading = null,
     followMode = true,
-    zoom = 18,
+    zoom = 17.3,
     padBottom = 0,
     padTop = 70,
     onStopTap,
@@ -104,22 +104,26 @@
       style: {
         version: 8,
         sources: {
-          ign: { type: 'raster', tiles: [TILE_URL], tileSize: 256, maxzoom: 19 },
+          // maxzoom 18 : au-delà on agrandit les images déjà là (4× moins de téléchargements)
+          ign: { type: 'raster', tiles: [TILE_URL], tileSize: 256, maxzoom: 18 },
         },
         layers: [
           { id: 'bg', type: 'background', paint: { 'background-color': '#dce2e7' } },
-          { id: 'ign', type: 'raster', source: 'ign' },
+          { id: 'ign', type: 'raster', source: 'ign', paint: { 'raster-fade-duration': 0 } },
         ],
       },
       center: [2.4, 46.6],
       zoom: 5,
       attributionControl: false,
+      fadeDuration: 0,
+      maxTileCacheSize: 2000,
+      refreshExpiredTiles: false,
       pitchWithRotate: false,
       maxZoom: 20,
     });
     map.touchPitch.disable();
     if (location.search.includes('demo')) (window as unknown as { __tmap: MlMap }).__tmap = map; // pour les tests
-    const zoomClass = () => el.classList.toggle('far', map!.getZoom() < 17);
+    const zoomClass = () => el.classList.toggle('far', map!.getZoom() < 16);
     map.on('zoom', zoomClass);
     zoomClass();
     map.on('load', () => {

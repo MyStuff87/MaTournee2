@@ -15,6 +15,7 @@
   import GpsHelp from '../components/GpsHelp.svelte';
   import NoteSheet from '../components/NoteSheet.svelte';
   import ThemeButton from '../components/ThemeButton.svelte';
+  import { prefetchTiles } from '../lib/tiles';
 
   let { tourneeId }: { tourneeId: string } = $props();
   let t = $state<Tournee | null>(null);
@@ -50,6 +51,8 @@
     filter = new PositionFilter(t.mode);
     keepAwake(true);
     stopGps = watchGPS(onFix, (e) => (gpsError = e));
+    // fonds de carte de toute la tournée, en tâche de fond (si pas déjà faits)
+    prefetchTiles($state.snapshot(t) as Tournee, () => {});
   });
 
   onDestroy(() => {
@@ -149,7 +152,7 @@
       stops={pins}
       position={pos}
       {heading}
-      zoom={t.mode === 'voiture' ? 17 : 18}
+      zoom={t.mode === 'voiture' ? 16.5 : t.mode === 'velo' ? 17 : 17.3}
       padBottom={cardH}
       {onStopTap}
     />

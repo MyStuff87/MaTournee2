@@ -7,7 +7,7 @@ import { isDemo } from './demo';
 export const TILE_URL =
   'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM&FORMAT=image/png&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}';
 
-const MAX_TILES = 3000;
+const MAX_TILES = 4000;
 
 function tileXY(lat: number, lon: number, z: number) {
   const n = 2 ** z;
@@ -19,7 +19,7 @@ function tileXY(lat: number, lon: number, z: number) {
 }
 
 export function tilesFor(t: Tournee): string[] {
-  const pts = [...t.track, ...Object.values(t.addrs)];
+  const pts = [...t.track, ...t.segments.flatMap((s) => s.path ?? []), ...t.segments.flatMap((s) => s.addrIds.map((id) => t.addrs[id]).filter(Boolean))];
   if (!pts.length) return [];
   const keys = new Set<string>();
   const add = (z: number, x: number, y: number) => keys.add(`${z}/${x}/${y}`);
@@ -31,7 +31,7 @@ export function tilesFor(t: Tournee): string[] {
     for (let x = a.x; x <= b.x; x++) for (let y = a.y; y <= b.y; y++) add(z, x, y);
   }
   for (const z of [17, 18]) {
-    const pad = z === 17 ? 1 : 0;
+    const pad = 1; // une tuile autour : la carte tourne, il faut de la marge
     for (const p of pts) {
       const { x, y } = tileXY(p.lat, p.lon, z);
       for (let dx = -pad; dx <= pad; dx++) for (let dy = -pad; dy <= pad; dy++) add(z, x + dx, y + dy);

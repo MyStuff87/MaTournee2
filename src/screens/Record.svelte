@@ -219,7 +219,7 @@
       {onMapTap}
       position={v.pos}
       heading={v.heading}
-      zoom={mode === 'voiture' ? 17 : 18}
+      zoom={mode === 'voiture' ? 16.5 : mode === 'velo' ? 17 : 17.3}
       padBottom={panelH}
     />
 

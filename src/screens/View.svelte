@@ -93,7 +93,7 @@
       position={cursor?.p ?? null}
       heading={cursor?.heading ?? null}
       followMode={along !== null}
-      zoom={18}
+      zoom={17.3}
       padBottom={cardH}
       padTop={80}
     />
