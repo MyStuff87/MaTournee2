@@ -163,8 +163,8 @@
     fitIfNeeded();
   });
 
-  function fitIfNeeded() {
-    if (!map || !ready || followMode || fittedOnce) return;
+  function fitIfNeeded(force = false) {
+    if (!map || !ready || (!force && (followMode || fittedOnce))) return;
     const b = new LngLatBounds();
     let n = 0;
     for (const f of routes.features)
@@ -178,7 +178,12 @@
     }
     if (!n) return;
     fittedOnce = true;
-    map.fitBounds(b, { padding: { top: padTop, bottom: padBottom + 30, left: 30, right: 30 }, maxZoom: 18, duration: 0 });
+    map.fitBounds(b, { padding: { top: padTop, bottom: padBottom + 30, left: 30, right: 30 }, maxZoom: 18, duration: force ? 600 : 0, bearing: 0 });
+  }
+
+  /** Revenir à la vue d'ensemble de la tournée. */
+  export function overview() {
+    fitIfNeeded(true);
   }
 
   // Numéros des arrêts
@@ -216,6 +221,16 @@
         pins.delete(id);
       }
     fitIfNeeded();
+  });
+
+  // Passage en mode suivi : on se recadre sur la position, zoom compris.
+  let wasFollow = followMode;
+  $effect(() => {
+    if (followMode && !wasFollow) {
+      firstFix = true;
+      following = true;
+    }
+    wasFollow = followMode;
   });
 
   // Position + caméra façon GPS

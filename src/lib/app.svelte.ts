@@ -7,6 +7,7 @@ export type Screen =
   | { name: 'review'; tourneeId: string }
   | { name: 'prepare'; tourneeId: string }
   | { name: 'guide'; tourneeId: string }
+  | { name: 'view'; tourneeId: string }
   | { name: 'libre' };
 
 export const app = $state({

@@ -9,6 +9,7 @@
   import Guide from './screens/Guide.svelte';
   import Libre from './screens/Libre.svelte';
   import Login from './screens/Login.svelte';
+  import View from './screens/View.svelte';
   import { sessionValid } from './lib/auth';
 
   let ready = $state(false);
@@ -40,6 +41,8 @@
       <Prepare tourneeId={app.screen.tourneeId} />
     {:else if app.screen.name === 'guide'}
       <Guide tourneeId={app.screen.tourneeId} />
+    {:else if app.screen.name === 'view'}
+      <View tourneeId={app.screen.tourneeId} />
     {:else if app.screen.name === 'libre'}
       <Libre />
     {/if}

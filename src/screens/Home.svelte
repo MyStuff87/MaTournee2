@@ -65,7 +65,10 @@
           <Plaque text={t.name} size="s" upper />
           <p class="sub meta">{s.addrs} adresses, {s.rues} rue{s.rues > 1 ? 's' : ''}, {modeLabel[t.mode].toLowerCase()}</p>
           <div class="row">
-            <button class="btn btn-primary grow" onclick={() => start(t)}>Préparer la journée</button>
+            <button class="btn btn-primary grow" onclick={() => start(t)}>Préparer</button>
+            <button class="btn btn-ghost edit" aria-label="Voir {t.name} sur la carte" onclick={() => { setCurrent(t.id); go({ name: 'view', tourneeId: t.id }); }}>
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linejoin="round" aria-hidden="true"><path d="M3 6l6-3 6 3 6-3v15l-6 3-6-3-6 3z" /><path d="M9 3v15M15 6v15" /></svg>
+            </button>
             <button class="btn btn-ghost edit" aria-label="Modifier {t.name}" onclick={() => { setCurrent(t.id); go({ name: 'review', tourneeId: t.id }); }}>
               <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 20h4L19 9l-4-4L4 16z" /><path d="M13.5 6.5l4 4" /></svg>
             </button>
