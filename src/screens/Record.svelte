@@ -13,6 +13,7 @@
   import Plaque from '../components/Plaque.svelte';
   import SidePill from '../components/SidePill.svelte';
   import GpsHelp from '../components/GpsHelp.svelte';
+  import ThemeButton from '../components/ThemeButton.svelte';
 
   let { tourneeId }: { tourneeId?: string } = $props();
 
@@ -272,6 +273,7 @@
       <button class="end" onclick={terminate}>Terminer</button>
     </div>
 
+    <div class="theme-slot"><ThemeButton /></div>
     <button class="icon-btn recenter" aria-label="Recentrer la carte" onclick={() => mapRef?.recenter()}>
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--email)" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></svg>
     </button>
@@ -486,6 +488,12 @@
   .recenter {
     position: absolute;
     right: 14px;
+    top: calc(var(--safe-top) + 68px);
+    z-index: 1100;
+  }
+  .theme-slot {
+    position: absolute;
+    left: 14px;
     top: calc(var(--safe-top) + 68px);
     z-index: 1100;
   }

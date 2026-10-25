@@ -12,6 +12,7 @@
   import SidePill from '../components/SidePill.svelte';
   import GpsHelp from '../components/GpsHelp.svelte';
   import NoteSheet from '../components/NoteSheet.svelte';
+  import ThemeButton from '../components/ThemeButton.svelte';
 
   let { tourneeId }: { tourneeId: string } = $props();
   let t = $state<Tournee | null>(null);
@@ -149,6 +150,7 @@
       <button class="icon-btn" aria-label="Quitter la tournée" onclick={() => history.back()}>
         <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" aria-hidden="true"><path d="M6 6l12 12M18 6L6 18" /></svg>
       </button>
+      <ThemeButton />
       <div class="prog" aria-label="Progression">
         <span class="cond count">{stops.length - pending.length}<span class="of">&nbsp;/ {stops.length}</span></span>
         <span class="bar"><span style="width: {pct}%"></span></span>

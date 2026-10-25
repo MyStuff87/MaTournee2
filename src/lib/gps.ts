@@ -1,6 +1,7 @@
 // Position GPS (ou simulée en mode démo) et maintien de l'écran allumé.
 import type { Fix } from './types';
 import { isDemo, startDemoGPS } from './demo';
+import { notePosition } from './theme';
 
 export type GpsError = 'denied' | 'unavailable' | null;
 
@@ -16,6 +17,7 @@ export function watchGPS(onFix: (f: Fix) => void, onError: (e: GpsError) => void
   const id = navigator.geolocation.watchPosition(
     (pos) => {
       onError(null);
+      notePosition(pos.coords.latitude, pos.coords.longitude);
       onFix({
         lat: pos.coords.latitude,
         lon: pos.coords.longitude,

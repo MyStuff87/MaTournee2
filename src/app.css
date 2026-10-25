@@ -70,32 +70,6 @@
   color-scheme: dark;
 }
 
-/* Plein soleil : contraste maximal, textes plus gras */
-:root[data-theme='sun'] {
-  --ground: #d5dce4;
-  --map: #d5dce4;
-  --card: #ffffff;
-  --ink: #000a1f;
-  --muted: #1f2a3d;
-  --faint: #1f2a3d;
-  --line: #6d7b90;
-  --line-soft: #8995a8;
-  --tile-off: #ffffff;
-  --road: #a9b5c4;
-  --email: #0f3f8f;
-  --pair-ink: #0f3f8f;
-  --pair-tint: #cfdcf2;
-  --impair: #a33d0a;
-  --impair-ink: #7d2c00;
-  --impair-tint: #f6d6c4;
-  --both-tint: #d5dbe4;
-  --solid: #000a1f;
-  --link: #0f3f8f;
-  --note: #ffe680;
-  --note-ink: #3d2c00;
-  --body-weight: 500;
-}
-
 * {
   box-sizing: border-box;
   -webkit-tap-highlight-color: transparent;
@@ -270,7 +244,7 @@ p {
   font-family: var(--body);
 }
 .leaflet-top.leaflet-left .leaflet-control-attribution {
-  margin-top: calc(var(--safe-top) + 64px) !important;
+  margin-top: calc(var(--safe-top) + 122px) !important;
 }
 .leaflet-control-attribution {
   font-size: 10px !important;
@@ -284,7 +258,4 @@ p {
 :root[data-theme='dark'] .leaflet-control-attribution {
   background: rgba(24, 35, 58, 0.8) !important;
   color: #a7b2c4;
-}
-:root[data-theme='sun'] .leaflet-tile-pane {
-  filter: contrast(1.15) saturate(1.1);
 }
