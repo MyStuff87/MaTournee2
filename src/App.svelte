@@ -11,6 +11,7 @@
   import Login from './screens/Login.svelte';
   import View from './screens/View.svelte';
   import Draw from './screens/Draw.svelte';
+  import SegEdit from './screens/SegEdit.svelte';
   import { sessionValid } from './lib/auth';
 
   let ready = $state(false);
@@ -42,6 +43,8 @@
       <Prepare tourneeId={app.screen.tourneeId} />
     {:else if app.screen.name === 'guide'}
       <Guide tourneeId={app.screen.tourneeId} />
+    {:else if app.screen.name === 'segedit'}
+      <SegEdit tourneeId={app.screen.tourneeId} segId={app.screen.segId} />
     {:else if app.screen.name === 'draw'}
       <Draw tourneeId={app.screen.tourneeId} />
     {:else if app.screen.name === 'view'}

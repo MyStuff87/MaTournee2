@@ -43,6 +43,11 @@
     pin?: LL | null;
     /** recadrer automatiquement sur la tournée (vue d'ensemble) */
     autoFit?: boolean;
+    /** recadrer sur ces points plutôt que sur toute la tournée */
+    fitTo?: LL[] | null;
+    /** repères à faire glisser (début / fin d'un tronçon) */
+    handles?: { id: string; label: string; lat: number; lon: number }[];
+    onHandleDrop?: (id: string, p: LL) => void;
     /** fin d'un déplacement de la carte */
     onMoveEnd?: (center: LL, zoom: number) => void;
   }
@@ -60,6 +65,9 @@
     pin = null,
     onMoveEnd,
     autoFit = true,
+    handles = [],
+    fitTo = null,
+    onHandleDrop,
   }: Props = $props();
 
   let el: HTMLDivElement;
@@ -225,6 +233,12 @@
     if (!map || !ready || (!force && (followMode || fittedOnce || !autoFit))) return;
     const b = new LngLatBounds();
     let n = 0;
+    if (fitTo?.length) {
+      for (const p of fitTo) b.extend([p.lon, p.lat]);
+      fittedOnce = true;
+      map.fitBounds(b, { padding: { top: padTop, bottom: padBottom + 30, left: 40, right: 40 }, maxZoom: 18, duration: 0, bearing: 0 });
+      return;
+    }
     for (const f of routes.features)
       for (const c of f.geometry.coordinates) {
         b.extend(c as [number, number]);
@@ -279,6 +293,36 @@
         pins.delete(id);
       }
     fitIfNeeded();
+  });
+
+  // Repères déplaçables
+  const handleMarkers = new Map<string, Marker>();
+  $effect(() => {
+    if (!map) return;
+    const keep = new Set(handles.map((h) => h.id));
+    for (const h of handles) {
+      let m = handleMarkers.get(h.id);
+      if (!m) {
+        const el = document.createElement('div');
+        el.className = 'handle';
+        el.textContent = h.label;
+        m = new Marker({ element: el, draggable: true, anchor: 'bottom' }).setLngLat([h.lon, h.lat]).addTo(map);
+        const id = h.id;
+        m.on('dragend', () => {
+          const ll = m!.getLngLat();
+          onHandleDrop?.(id, { lat: ll.lat, lon: ll.lng });
+        });
+        handleMarkers.set(h.id, m);
+      } else {
+        m.setLngLat([h.lon, h.lat]);
+        (m.getElement() as HTMLElement).textContent = h.label;
+      }
+    }
+    for (const [id, m] of handleMarkers)
+      if (!keep.has(id)) {
+        m.remove();
+        handleMarkers.delete(id);
+      }
   });
 
   // Épingle « je suis ici »
@@ -465,6 +509,18 @@
     border-radius: 50%;
     background: var(--yellow);
     box-shadow: 0 0 0 2px var(--on-yellow);
+  }
+  .tmap :global(.handle) {
+    padding: 8px 12px;
+    border-radius: 12px 12px 12px 2px;
+    background: var(--yellow);
+    color: var(--on-yellow);
+    font: 700 16px/1 var(--cond);
+    box-shadow:
+      inset 0 0 0 2px var(--on-yellow),
+      0 3px 10px rgba(21, 35, 63, 0.35);
+    cursor: grab;
+    touch-action: none;
   }
   .tmap :global(.pin) {
     width: 30px;

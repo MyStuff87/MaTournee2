@@ -135,3 +135,22 @@ export function pointAt(line: LL[], along: number): { p: LL; heading: number } {
   }
   return { p: line[0], heading: 0 };
 }
+
+/** Morceau d'une polyligne entre deux abscisses (en mètres). */
+export function subLine(line: LL[], from: number, to: number): LL[] {
+  const out: LL[] = [];
+  let acc = 0;
+  for (let i = 0; i < line.length - 1; i++) {
+    const a = line[i];
+    const b = line[i + 1];
+    const len = dist(a, b);
+    const s = acc;
+    const e = acc + len;
+    acc = e;
+    if (e < from || s > to) continue;
+    const at = (t: number) => ({ lat: a.lat + (b.lat - a.lat) * t, lon: a.lon + (b.lon - a.lon) * t });
+    if (!out.length) out.push(len ? at(Math.max(0, (from - s) / len)) : a);
+    out.push(len ? at(Math.min(1, (to - s) / len)) : b);
+  }
+  return out;
+}

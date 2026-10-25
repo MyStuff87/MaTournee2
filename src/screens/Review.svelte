@@ -269,6 +269,7 @@
                     >
                   {/each}
                 </div>
+                <button class="btn btn-primary trace-btn" onclick={() => go({ name: 'segedit', tourneeId: t!.id, segId: seg.id })}>Modifier le tracé sur la carte</button>
                 <div class="actions">
                   <button class="btn btn-ghost" onclick={() => move(i, -1)} disabled={i === 0}>Monter</button>
                   <button class="btn btn-ghost" onclick={() => move(i, 1)} disabled={i === t.segments.length - 1}>Descendre</button>
@@ -344,6 +345,10 @@
   }
   .two .btn {
     flex: 1;
+  }
+  .trace-btn {
+    min-height: 54px;
+    font-size: 20px;
   }
   .passage {
     display: flex;
