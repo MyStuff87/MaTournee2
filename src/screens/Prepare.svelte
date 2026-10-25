@@ -103,7 +103,7 @@
       <div class="grid">
         {#each addrs as a (a.id)}
           {@const on = checked.has(a.id)}
-          <button class="tile" class:on aria-pressed={on} onclick={() => toggle(a.id)}>{label(a)}</button>
+          <button class="tile" class:on class:has-note={!!t?.notes?.[a.id]} aria-pressed={on} onclick={() => toggle(a.id)}>{label(a)}</button>
         {/each}
       </div>
     </section>
@@ -187,6 +187,20 @@
   .tile:active {
     transform: scale(0.94);
   }
+  .tile {
+    position: relative;
+  }
+  .tile.has-note::after {
+    content: '';
+    position: absolute;
+    right: -4px;
+    top: -4px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--yellow);
+    box-shadow: 0 0 0 2px var(--card);
+  }
   .tile.on {
     border: 0;
     background: var(--email);
@@ -201,7 +215,7 @@
     right: 0;
     bottom: 0;
     padding: 14px 20px calc(var(--safe-bottom) + 18px);
-    background: linear-gradient(to bottom, rgba(232, 236, 239, 0), var(--ground) 30%);
+    background: linear-gradient(to bottom, transparent, var(--ground) 30%);
     display: flex;
     justify-content: center;
   }

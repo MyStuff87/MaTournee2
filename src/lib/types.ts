@@ -32,6 +32,8 @@ export interface Tournee {
   updatedAt: number;
   segments: Segment[];
   addrs: Record<string, Addr>;
+  /** notes par adresse (id -> texte) */
+  notes?: Record<string, string>;
   /** tracé enregistré */
   track: { lat: number; lon: number }[];
 }

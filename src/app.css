@@ -15,20 +15,85 @@
   --line: #c9d1db;
   --line-soft: #d3dae3;
   --tile-off: #f6f8fa;
+  --road: #cdd5de;
   --email: #1b4c9c;
+  --pair-ink: #1b4c9c;
   --pair-tint: #e3eaf6;
   --impair: #b84a12;
   --impair-ink: #9a3c0c;
   --impair-tint: #f8e6dc;
   --both-tint: #e4e7ec;
   --yellow: #ffc20e;
+  --on-yellow: #15233f;
+  --solid: #15233f;
+  --link: #1b4c9c;
   --ok: #1f7a4d;
   --rec: #f0603a;
+  --danger: #a32a12;
+  --note: #fff4cc;
+  --note-ink: #5c4300;
   --cond: 'Barlow Condensed', 'Arial Narrow', sans-serif;
   --body: 'Barlow', -apple-system, system-ui, sans-serif;
+  --body-weight: 400;
   --safe-top: env(safe-area-inset-top, 0px);
   --safe-bottom: env(safe-area-inset-bottom, 0px);
   color-scheme: light;
+}
+
+/* Nuit : fond sombre, plaques toujours bleues, rien d'éblouissant */
+:root[data-theme='dark'] {
+  --ground: #0e1626;
+  --map: #172133;
+  --card: #18233a;
+  --ink: #e8edf5;
+  --muted: #a7b2c4;
+  --faint: #95a2b6;
+  --line: #34425c;
+  --line-soft: #2c3a52;
+  --tile-off: #1f2b44;
+  --road: #2a3750;
+  --email: #2557ad;
+  --pair-ink: #9dbbf0;
+  --pair-tint: #22355a;
+  --impair: #c2531a;
+  --impair-ink: #f2a57e;
+  --impair-tint: #48291b;
+  --both-tint: #2a3448;
+  --yellow: #f5b800;
+  --on-yellow: #101a2e;
+  --solid: #2b3b5e;
+  --link: #9dbbf0;
+  --ok: #3ba272;
+  --danger: #ff8a6b;
+  --note: #3d3416;
+  --note-ink: #ffe08a;
+  color-scheme: dark;
+}
+
+/* Plein soleil : contraste maximal, textes plus gras */
+:root[data-theme='sun'] {
+  --ground: #d5dce4;
+  --map: #d5dce4;
+  --card: #ffffff;
+  --ink: #000a1f;
+  --muted: #1f2a3d;
+  --faint: #1f2a3d;
+  --line: #6d7b90;
+  --line-soft: #8995a8;
+  --tile-off: #ffffff;
+  --road: #a9b5c4;
+  --email: #0f3f8f;
+  --pair-ink: #0f3f8f;
+  --pair-tint: #cfdcf2;
+  --impair: #a33d0a;
+  --impair-ink: #7d2c00;
+  --impair-tint: #f6d6c4;
+  --both-tint: #d5dbe4;
+  --solid: #000a1f;
+  --link: #0f3f8f;
+  --note: #ffe680;
+  --note-ink: #3d2c00;
+  --body-weight: 500;
 }
 
 * {
@@ -42,6 +107,7 @@ body {
   background: var(--ground);
   color: var(--ink);
   font-family: var(--body);
+  font-weight: var(--body-weight);
   font-size: 16px;
   -webkit-text-size-adjust: 100%;
   overscroll-behavior: none;
@@ -132,7 +198,7 @@ p {
 
 .btn-primary {
   background: var(--yellow);
-  color: var(--ink);
+  color: var(--on-yellow);
   min-height: 66px;
   font-size: 25px;
   border-radius: 20px;
@@ -147,7 +213,7 @@ p {
 }
 
 .btn-dark {
-  background: var(--ink);
+  background: var(--solid);
   color: #fff;
 }
 
@@ -177,7 +243,7 @@ p {
   background: none;
   border: 0;
   padding: 8px 0;
-  color: var(--email);
+  color: var(--link);
   font-weight: 600;
   font-size: 15px;
 }
@@ -199,7 +265,7 @@ p {
 }
 
 /* Leaflet allégé */
-.leaflet-container {
+:root .leaflet-container {
   background: var(--map);
   font-family: var(--body);
 }
@@ -209,4 +275,16 @@ p {
 .leaflet-control-attribution {
   font-size: 10px !important;
   background: rgba(255, 255, 255, 0.7) !important;
+}
+
+/* Carte la nuit : fond de carte assombri */
+:root[data-theme='dark'] .leaflet-tile-pane {
+  filter: invert(1) hue-rotate(180deg) brightness(0.85) contrast(0.9) saturate(0.5);
+}
+:root[data-theme='dark'] .leaflet-control-attribution {
+  background: rgba(24, 35, 58, 0.8) !important;
+  color: #a7b2c4;
+}
+:root[data-theme='sun'] .leaflet-tile-pane {
+  filter: contrast(1.15) saturate(1.1);
 }

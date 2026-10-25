@@ -69,7 +69,7 @@
     z-index: 2000;
     max-width: 540px;
     margin: 0 auto;
-    background: var(--ink);
+    background: var(--solid);
     color: #fff;
     border-radius: 16px;
     min-height: 54px;
@@ -88,7 +88,7 @@
   .toast button {
     border: 0;
     background: var(--yellow);
-    color: var(--ink);
+    color: var(--on-yellow);
     border-radius: 12px;
     height: 40px;
     padding: 0 14px;

@@ -4,6 +4,7 @@
   import { listTournees } from '../lib/db';
   import { exportTournees, importFile } from '../lib/backup';
   import { logout } from '../lib/auth';
+  import { getTheme, setTheme, type ThemeChoice } from '../lib/theme';
   import type { Tournee } from '../lib/types';
   import Plaque from '../components/Plaque.svelte';
 
@@ -11,6 +12,17 @@
   let loaded = $state(false);
   let picking = $state(false);
   let fileInput: HTMLInputElement;
+  let theme = $state<ThemeChoice>(getTheme());
+  const THEMES: [ThemeChoice, string][] = [
+    ['auto', 'Auto'],
+    ['light', 'Clair'],
+    ['dark', 'Nuit'],
+    ['sun', 'Soleil'],
+  ];
+  function pickTheme(c: ThemeChoice) {
+    theme = c;
+    setTheme(c);
+  }
 
   const current = $derived(tournees.find((t) => t.id === app.currentTourneeId) ?? tournees[0]);
   const others = $derived(tournees.filter((t) => t !== current));
@@ -129,6 +141,18 @@
       {/each}
     </section>
   {/if}
+
+  <section class="display">
+    <h2 class="sub small list-h">Affichage</h2>
+    <div class="themes" role="group" aria-label="Affichage">
+      {#each THEMES as [val, lab] (val)}
+        <button class:on={theme === val} aria-pressed={theme === val} onclick={() => pickTheme(val)}>{lab}</button>
+      {/each}
+    </div>
+    <p class="sub small">
+      {theme === 'auto' ? "Suit le réglage clair / sombre de ton téléphone." : theme === 'dark' ? 'Écran sombre pour les départs de nuit.' : theme === 'sun' ? 'Contraste maximal pour le plein soleil.' : 'Toujours clair.'}
+    </p>
+  </section>
 
   <footer class="foot">
     {#if tournees.length}
@@ -252,6 +276,34 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+  }
+  .display {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+  }
+  .themes {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 6px;
+    background: var(--card);
+    border-radius: 16px;
+    padding: 5px;
+  }
+  .themes button {
+    height: 44px;
+    border: 0;
+    border-radius: 12px;
+    background: transparent;
+    font: 700 18px var(--cond);
+    color: var(--muted);
+  }
+  .themes button.on {
+    background: var(--solid);
+    color: #fff;
+  }
+  .display .small {
+    margin-left: 4px;
   }
   .foot {
     margin-top: auto;

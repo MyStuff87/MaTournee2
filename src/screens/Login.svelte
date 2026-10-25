@@ -171,7 +171,7 @@
     font-size: 14px;
   }
   .err {
-    color: #a32a12;
+    color: var(--danger);
     font-weight: 600;
   }
   .forgot {
@@ -180,6 +180,6 @@
     gap: 12px;
   }
   .danger {
-    color: #a32a12;
+    color: var(--danger);
   }
 </style>

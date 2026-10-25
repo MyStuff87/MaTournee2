@@ -1,7 +1,7 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
   import { go, today, toast } from '../lib/app.svelte';
-  import { getSession, getTournee, saveSession } from '../lib/db';
+  import { getSession, getTournee, saveSession, saveTournee } from '../lib/db';
   import { AddressIndex, isEven, label } from '../lib/addressIndex';
   import { Guide, stopsFor } from '../lib/guide';
   import { TrackFollower } from '../lib/follow';
@@ -11,6 +11,7 @@
   import GuideMap from '../components/GuideMap.svelte';
   import SidePill from '../components/SidePill.svelte';
   import GpsHelp from '../components/GpsHelp.svelte';
+  import NoteSheet from '../components/NoteSheet.svelte';
 
   let { tourneeId }: { tourneeId: string } = $props();
   let t = $state<Tournee | null>(null);
@@ -85,8 +86,10 @@
     }
   }
 
-  // Toucher un numéro sur la carte : le marquer fait, ou le remettre à faire.
-  function onStopTap(a: Addr) {
+  // Toucher un numéro sur la carte : ouvre sa fiche (fait / à faire, note).
+  let sheetAddr = $state<Addr | null>(null);
+
+  function toggleDone(a: Addr) {
     const n = new Set(done);
     const wasDone = n.has(a.id);
     if (wasDone) n.delete(a.id);
@@ -96,8 +99,24 @@
     save();
     toast(`${label(a)} ${a.street} : ${wasDone ? 'remis à faire' : 'marqué fait'}`, {
       label: 'Annuler',
-      run: () => onStopTap(a),
+      run: () => toggleDone(a),
     });
+  }
+
+  function onStopTap(a: Addr) {
+    sheetAddr = a;
+  }
+
+  function saveNote(a: Addr, text: string) {
+    if (!t) return;
+    const notes = { ...(t.notes ?? {}) };
+    if (text) notes[a.id] = text;
+    else delete notes[a.id];
+    t.notes = notes;
+    t.updatedAt = Date.now();
+    saveTournee($state.snapshot(t) as Tournee);
+    sheetAddr = null;
+    toast(text ? 'Note enregistrée' : 'Note effacée');
   }
 
   function restart() {
@@ -122,6 +141,7 @@
       position={pos}
       {heading}
       bottomInset={cardH}
+      notes={t.notes ?? {}}
       {onStopTap}
     />
 
@@ -149,6 +169,12 @@
             </div>
           </div>
         </div>
+        {#if t.notes?.[cur.id]}
+          <button class="note" onclick={() => (sheetAddr = cur)}>
+            <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16v12H9l-5 4z" /></svg>
+            <span>{t.notes[cur.id]}</span>
+          </button>
+        {/if}
         {#if next.length}
           <p class="then">
             <span class="sub">Ensuite</span>
@@ -172,6 +198,25 @@
       {/if}
     </section>
   </div>
+
+  {#if sheetAddr}
+    {@const a = sheetAddr}
+    <NoteSheet
+      addr={a}
+      note={t.notes?.[a.id] ?? ''}
+      onSave={(text) => saveNote(a, text)}
+      onClose={() => (sheetAddr = null)}
+      action={stops.some((s) => s.id === a.id)
+        ? {
+            label: done.has(a.id) ? 'Remettre à faire' : 'Marquer comme fait',
+            run: () => {
+              toggleDone(a);
+              sheetAddr = null;
+            },
+          }
+        : null}
+    />
+  {/if}
 {/if}
 
 <style>
@@ -201,7 +246,7 @@
     height: 44px;
     padding: 0 16px;
     border-radius: 999px;
-    background: var(--ink);
+    background: var(--solid);
     color: #fff;
     min-width: 170px;
   }
@@ -257,11 +302,11 @@
     justify-content: center;
     border-radius: 16px;
     background: var(--yellow);
-    color: var(--ink);
+    color: var(--on-yellow);
     font-weight: 700;
     font-size: 52px;
     line-height: 1;
-    box-shadow: inset 0 0 0 4px var(--ink);
+    box-shadow: inset 0 0 0 4px var(--on-yellow);
     flex: none;
   }
   .nextcol {
@@ -278,6 +323,24 @@
   .dist {
     font-weight: 600;
     font-size: 21px;
+  }
+  .note {
+    display: flex;
+    align-items: flex-start;
+    gap: 10px;
+    text-align: left;
+    border: 0;
+    border-radius: 14px;
+    padding: 10px 12px;
+    background: var(--note);
+    color: var(--note-ink);
+    font-weight: 600;
+    font-size: 17px;
+    line-height: 1.3;
+  }
+  .note svg {
+    flex: none;
+    margin-top: 1px;
   }
   .then {
     display: flex;

@@ -21,7 +21,7 @@
   }
   .pair {
     background: var(--pair-tint);
-    color: var(--email);
+    color: var(--pair-ink);
   }
   .impair {
     background: var(--impair-tint);

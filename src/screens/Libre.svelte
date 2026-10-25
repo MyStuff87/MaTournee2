@@ -205,7 +205,7 @@
     color: var(--impair-ink);
   }
   .even .col-h {
-    color: var(--email);
+    color: var(--pair-ink);
   }
   .n {
     display: flex;
@@ -231,7 +231,7 @@
     margin: auto 0;
   }
   .road {
-    background: #cdd5de;
+    background: var(--road);
     border-radius: 14px;
     display: flex;
     flex-direction: column;

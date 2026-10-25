@@ -414,8 +414,8 @@
     font: 700 20px var(--cond);
   }
   .seg button.on {
-    border-color: var(--ink);
-    background: var(--ink);
+    border-color: var(--solid);
+    background: var(--solid);
     color: #fff;
   }
 
@@ -446,7 +446,7 @@
     height: 44px;
     padding: 0 16px 0 14px;
     border-radius: 999px;
-    background: var(--ink);
+    background: var(--solid);
     color: #fff;
   }
   .pill-rec .dot {
@@ -565,7 +565,7 @@
     background: var(--impair);
   }
   .side.both {
-    background: var(--ink);
+    background: var(--solid);
   }
   .grow {
     flex: 1;

@@ -19,9 +19,10 @@
     heading: number | null;
     /** marge basse (px) cachée par la carte d'info, pour bien placer la position */
     bottomInset?: number;
+    notes?: Record<string, string>;
     onStopTap?: (a: Addr) => void;
   }
-  let { track, trackIdx, aheadIdx, stops, done, nextId, position, heading, bottomInset = 0, onStopTap }: Props = $props();
+  let { track, trackIdx, aheadIdx, stops, done, nextId, position, heading, bottomInset = 0, notes = {}, onStopTap }: Props = $props();
 
   let el: HTMLDivElement;
   let map: L.Map | undefined = $state();
@@ -63,10 +64,11 @@
   });
 
   function iconFor(a: Addr, state: string) {
-    const txt = state === 'done' ? '' : label(a);
+    const [base, flag] = state.split('+');
+    const txt = base === 'done' ? '' : label(a);
     return L.divIcon({
       className: '',
-      html: `<span class="mk ${state}">${txt}</span>`,
+      html: `<span class="mk ${base}${flag ? ' has-note' : ''}">${txt}</span>`,
       iconSize: [0, 0],
       iconAnchor: [0, 0],
     });
@@ -77,16 +79,16 @@
     const keep = new Set<string>();
     for (const a of stops) {
       keep.add(a.id);
-      const state = a.id === nextId ? 'next' : done.has(a.id) ? 'done' : 'todo';
+      const state = (a.id === nextId ? 'next' : done.has(a.id) ? 'done' : 'todo') + (notes[a.id] ? '+n' : '');
       const cur = markers.get(a.id);
       if (!cur) {
-        const m = L.marker([a.lat, a.lon], { icon: iconFor(a, state), zIndexOffset: state === 'next' ? 1000 : 0 })
+        const m = L.marker([a.lat, a.lon], { icon: iconFor(a, state), zIndexOffset: state.startsWith('next') ? 1000 : 0 })
           .on('click', () => onStopTap?.(a))
           .addTo(map);
         markers.set(a.id, { m, state });
       } else if (cur.state !== state) {
         cur.m.setIcon(iconFor(a, state));
-        cur.m.setZIndexOffset(state === 'next' ? 1000 : state === 'todo' ? 100 : 0);
+        cur.m.setZIndexOffset(state.startsWith('next') ? 1000 : state.startsWith('todo') ? 100 : 0);
         cur.state = state;
       }
     }
@@ -154,7 +156,7 @@
     padding: 0 18px;
     border: 0;
     border-radius: 999px;
-    background: var(--ink);
+    background: var(--solid);
     color: #fff;
     font: 700 18px var(--cond);
     box-shadow: 0 4px 14px rgba(21, 35, 63, 0.25);
@@ -182,11 +184,25 @@
     height: 44px;
     font-size: 26px;
     background: var(--yellow);
-    color: var(--ink);
+    color: var(--on-yellow);
     box-shadow:
-      inset 0 0 0 3px var(--ink),
+      inset 0 0 0 3px var(--on-yellow),
       0 3px 10px rgba(21, 35, 63, 0.4);
     border-radius: 10px;
+  }
+  .gmap :global(.mk.has-note)::after {
+    content: '';
+    position: absolute;
+    right: -5px;
+    top: -5px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--yellow);
+    box-shadow: 0 0 0 2px var(--on-yellow);
+  }
+  .gmap :global(.mk) {
+    position: relative;
   }
   .gmap :global(.mk.done) {
     min-width: 10px;

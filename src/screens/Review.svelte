@@ -8,11 +8,25 @@
   import Plaque from '../components/Plaque.svelte';
   import SidePill from '../components/SidePill.svelte';
   import MapView from '../components/MapView.svelte';
+  import NoteSheet from '../components/NoteSheet.svelte';
 
   let { tourneeId }: { tourneeId: string } = $props();
   let t = $state<Tournee | null>(null);
   let open = $state<string | null>(null);
   let showMap = $state(false);
+  let tapMode = $state<'include' | 'note'>('include');
+  let noteAddr = $state<Addr | null>(null);
+
+  function saveNote(a: Addr, text: string) {
+    if (!t) return;
+    const notes = { ...(t.notes ?? {}) };
+    if (text) notes[a.id] = text;
+    else delete notes[a.id];
+    t.notes = notes;
+    noteAddr = null;
+    save();
+    toast(text ? 'Note enregistrée' : 'Note effacée');
+  }
 
   onMount(async () => {
     t = (await getTournee(tourneeId)) ?? null;
@@ -162,11 +176,24 @@
                     <button class:on={seg.side === val} aria-pressed={seg.side === val} onclick={() => setSide(seg, val as Side)}>{lab}</button>
                   {/each}
                 </div>
-                <p class="sub small">Touche un numéro pour l'ajouter ou le retirer du tronçon.</p>
+                <div class="tapmode" role="group" aria-label="Quand je touche un numéro">
+                  <button class:on={tapMode === 'include'} aria-pressed={tapMode === 'include'} onclick={() => (tapMode = 'include')}>Ajouter / retirer</button>
+                  <button class:on={tapMode === 'note'} aria-pressed={tapMode === 'note'} onclick={() => (tapMode = 'note')}>Écrire une note</button>
+                </div>
+                <p class="sub small">
+                  {tapMode === 'include' ? "Touche un numéro pour l'ajouter ou le retirer du tronçon." : 'Touche un numéro pour écrire sa note. Les numéros avec une note ont un point jaune.'}
+                </p>
                 <div class="grid">
                   {#each streetAddrs(seg) as a (a.id)}
                     {@const on = seg.addrIds.includes(a.id)}
-                    <button class="tile" class:on aria-pressed={on} onclick={() => toggle(seg, a)}>{label(a)}</button>
+                    <button
+                      class="tile"
+                      class:on
+                      class:has-note={!!t.notes?.[a.id]}
+                      aria-pressed={tapMode === 'include' ? on : undefined}
+                      aria-label="{label(a)}{t.notes?.[a.id] ? ', avec note' : ''}"
+                      onclick={() => (tapMode === 'note' ? (noteAddr = a) : toggle(seg, a))}>{label(a)}</button
+                    >
                   {/each}
                 </div>
                 <div class="actions">
@@ -189,6 +216,11 @@
       <button class="link danger-link" onclick={destroy}>Supprimer la tournée</button>
     </div>
   </main>
+
+  {#if noteAddr}
+    {@const a = noteAddr}
+    <NoteSheet addr={a} note={t.notes?.[a.id] ?? ''} onSave={(text) => saveNote(a, text)} onClose={() => (noteAddr = null)} />
+  {/if}
 {/if}
 
 <style>
@@ -229,8 +261,8 @@
     height: 44px;
   }
   .seg3 button.on {
-    border-color: var(--ink);
-    background: var(--ink);
+    border-color: var(--solid);
+    background: var(--solid);
     color: #fff;
   }
   .map {
@@ -305,6 +337,42 @@
     font: 700 21px/1 var(--cond);
     padding: 0 2px;
   }
+  .tile {
+    position: relative;
+  }
+  .tile.has-note::after {
+    content: '';
+    position: absolute;
+    right: -4px;
+    top: -4px;
+    width: 12px;
+    height: 12px;
+    border-radius: 50%;
+    background: var(--yellow);
+    box-shadow: 0 0 0 2px var(--card);
+  }
+  .tapmode {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    padding: 4px;
+    border-radius: 14px;
+    background: var(--ground);
+  }
+  .tapmode button {
+    height: 40px;
+    border: 0;
+    border-radius: 10px;
+    background: transparent;
+    font-weight: 600;
+    font-size: 15px;
+    color: var(--muted);
+  }
+  .tapmode button.on {
+    background: var(--card);
+    color: var(--ink);
+    box-shadow: 0 1px 4px rgba(21, 35, 63, 0.15);
+  }
   .tile.on {
     border: 0;
     background: var(--email);
@@ -323,7 +391,7 @@
     font-size: 15px;
   }
   .danger {
-    color: #a32a12;
+    color: var(--danger);
   }
   .foot {
     display: flex;
@@ -332,6 +400,6 @@
     flex-wrap: wrap;
   }
   .danger-link {
-    color: #a32a12;
+    color: var(--danger);
   }
 </style>
