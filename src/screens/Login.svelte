@@ -1,6 +1,6 @@
 <script lang="ts">
   import { onMount } from 'svelte';
-  import { checkLogin, createAccount, getLogin, hasAccount, wipeEverything } from '../lib/auth';
+  import { checkInvite, checkLogin, createAccount, getLogin, hasAccount, wipeEverything } from '../lib/auth';
   import Plaque from '../components/Plaque.svelte';
 
   let { onDone }: { onDone: () => void } = $props();
@@ -9,6 +9,7 @@
   let login = $state('');
   let password = $state('');
   let confirm2 = $state('');
+  let invite = $state('');
   let error = $state('');
   let busy = $state(false);
   let forgot = $state(false);
@@ -24,12 +25,17 @@
     error = '';
     if (!login.trim()) return (error = 'Indique ton identifiant.');
     if (mode === 'create') {
+      if (!invite.trim()) return (error = "Indique le code d'invitation.");
       if (password.length < 6) return (error = 'Le mot de passe doit faire au moins 6 caractères.');
       if (password !== confirm2) return (error = 'Les deux mots de passe ne sont pas identiques.');
     }
     busy = true;
     try {
       if (mode === 'create') {
+        if (!(await checkInvite(invite))) {
+          error = "Code d'invitation incorrect.";
+          return;
+        }
         await createAccount(login, password);
         onDone();
       } else if (await checkLogin(login, password)) onDone();
@@ -57,7 +63,11 @@
     <form class="card form" onsubmit={submit}>
       <h1 class="h1">{mode === 'create' ? 'Crée ton accès' : 'Connexion'}</h1>
       {#if mode === 'create'}
-        <p class="sub">Choisis un identifiant et un mot de passe. Ils te seront demandés pour ouvrir l'appli sur ce téléphone.</p>
+        <p class="sub">L'appli est réservée : il faut un code d'invitation. Choisis ensuite ton identifiant et ton mot de passe.</p>
+        <label class="field">
+          <span>Code d'invitation</span>
+          <input bind:value={invite} autocomplete="off" autocapitalize="characters" spellcheck="false" placeholder="XXXX-XXXX-XXXX" />
+        </label>
       {/if}
 
       <label class="field">

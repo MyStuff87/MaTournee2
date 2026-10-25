@@ -11,6 +11,10 @@ interface Account {
 }
 
 const SESSION_KEY = 'matournee-session';
+
+// Code d'invitation, obligatoire pour créer un accès. Seule son empreinte est ici :
+// le code lui-même n'apparaît nulle part dans le code source.
+const INVITE = { salt: '4h2g4lEma8HvLY8zxZq2pg==', hash: 'Bo9NfUmrgmA8wFyGsp+BmURiwe4NOus3SOcTlKtoNT4=', iter: 210000 };
 const SESSION_HOURS = 14; // une journée de travail
 
 const b64 = (buf: ArrayBuffer | Uint8Array) => btoa(String.fromCharCode(...new Uint8Array(buf)));
@@ -30,6 +34,13 @@ export async function hasAccount(): Promise<boolean> {
 
 export async function getLogin(): Promise<string | null> {
   return (await getKV<Account>('account'))?.login ?? null;
+}
+
+/** Vérifie le code d'invitation (espaces, tirets et majuscules ignorés). */
+export async function checkInvite(code: string): Promise<boolean> {
+  const clean = code.toUpperCase().replace(/[^A-Z0-9]/g, '');
+  if (clean.length < 8) return false;
+  return (await derive(clean, unb64(INVITE.salt), INVITE.iter)) === INVITE.hash;
 }
 
 export async function createAccount(login: string, password: string) {
