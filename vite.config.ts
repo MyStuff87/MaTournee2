@@ -32,6 +32,22 @@ export default defineConfig({
         navigateFallback: 'index.html',
         runtimeCaching: [
           {
+            // carte vectorielle : tuiles, polices, icônes (versionnées, ne changent pas)
+            urlPattern: ({ url }) => url.hostname === 'tiles.openfreemap.org' && !url.pathname.startsWith('/styles') && url.pathname !== '/planet',
+            handler: 'CacheFirst',
+            options: {
+              cacheName: 'carte-vectorielle',
+              expiration: { maxEntries: 6000, maxAgeSeconds: 60 * 60 * 24 * 120 },
+              cacheableResponse: { statuses: [0, 200] },
+            },
+          },
+          {
+            // styles et index des tuiles : on sert le cache tout de suite, mis à jour en fond
+            urlPattern: ({ url }) => url.hostname === 'tiles.openfreemap.org',
+            handler: 'StaleWhileRevalidate',
+            options: { cacheName: 'carte-styles', cacheableResponse: { statuses: [0, 200] } },
+          },
+          {
             // fonds de carte IGN : gardés pour la tournée hors-ligne
             urlPattern: ({ url }) => url.hostname === 'data.geopf.fr' && url.pathname.startsWith('/wmts'),
             handler: 'CacheFirst',

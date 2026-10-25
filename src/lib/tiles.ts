@@ -43,16 +43,46 @@ export function tilesFor(t: Tournee): string[] {
   });
 }
 
+function tileXYZ(lat: number, lon: number, z: number) {
+  return tileXY(lat, lon, z);
+}
+
+/** Tuiles vectorielles (OpenFreeMap) couvrant la tournée, zooms 10 à 14 (au-delà, la carte agrandit). */
+async function vectorTilesFor(t: Tournee): Promise<string[]> {
+  const r = await fetch('https://tiles.openfreemap.org/planet');
+  const tpl: string | undefined = (await r.json())?.tiles?.[0];
+  if (!tpl) return [];
+  const pts = [...t.track, ...t.segments.flatMap((s) => s.path ?? []), ...Object.values(t.addrs)];
+  if (!pts.length) return [];
+  const lats = pts.map((p) => p.lat);
+  const lons = pts.map((p) => p.lon);
+  const m = 0.01; // ~1 km de marge
+  const out: string[] = [];
+  for (let z = 10; z <= 14; z++) {
+    const a = tileXYZ(Math.max(...lats) + m, Math.min(...lons) - m, z);
+    const b = tileXYZ(Math.min(...lats) - m, Math.max(...lons) + m, z);
+    for (let x = a.x; x <= b.x; x++) for (let y = a.y; y <= b.y; y++) out.push(tpl.replace('{z}', String(z)).replace('{x}', String(x)).replace('{y}', String(y)));
+  }
+  return out.slice(0, 1500);
+}
+
 /** Lance le pré-chargement si besoin. `onProgress(fait, total)`. */
 export async function prefetchTiles(t: Tournee, onProgress: (done: number, total: number) => void): Promise<boolean> {
   if (isDemo() || !navigator.onLine || !('serviceWorker' in navigator)) return false;
-  const key = `tiles-${t.id}`;
+  const key = `tiles2-${t.id}`;
   const last = await getKV<number>(key);
   if (last && last > t.updatedAt && Date.now() - last < 30 * 86400 * 1000) {
     onProgress(1, 1);
     return true;
   }
-  const urls = tilesFor(t);
+  let urls: string[];
+  try {
+    urls = await vectorTilesFor(t);
+    // le style et ses polices / icônes, pour afficher la carte hors-ligne
+    urls.push('https://tiles.openfreemap.org/styles/liberty', 'https://tiles.openfreemap.org/styles/dark');
+  } catch {
+    urls = tilesFor(t); // service vectoriel injoignable : images IGN
+  }
   let done = 0;
   let failed = 0;
   onProgress(0, urls.length);
@@ -61,7 +91,7 @@ export async function prefetchTiles(t: Tournee, onProgress: (done: number, total
     while (queue.length) {
       const u = queue.shift()!;
       try {
-        await fetch(u, { mode: 'no-cors' });
+        await fetch(u, u.includes('openfreemap') ? {} : { mode: 'no-cors' });
       } catch {
         failed++;
       }

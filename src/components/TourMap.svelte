@@ -83,35 +83,89 @@
     return ['match', ['get', 'side'], 'pair', c.pair, 'impair', c.impair, 'both', c.both, c.none];
   }
 
-  function applyTheme() {
-    if (!map || !ready) return;
-    const dark = isDark();
-    map.setPaintProperty('ign', 'raster-brightness-min', dark ? 0.92 : 0);
-    map.setPaintProperty('ign', 'raster-brightness-max', dark ? 0.1 : 1);
-    map.setPaintProperty('ign', 'raster-hue-rotate', dark ? 180 : 0);
-    map.setPaintProperty('ign', 'raster-saturation', dark ? -0.55 : 0);
-    map.setPaintProperty('bg', 'background-color', dark ? '#172133' : '#dce2e7');
-    for (const id of ['route-later', 'route-next']) map.setPaintProperty(id, 'line-color', sideColor() as never);
-    map.setPaintProperty('route-done', 'line-color', dark ? COLORS.dark.done : COLORS.light.done);
-  }
+  // --- Fond de carte ---
+  // Carte vectorielle OpenFreeMap (nette à tout zoom, légère, style nuit natif).
+  // En secours (pas de réseau, service indisponible) : les images du Plan IGN.
+  const VECTOR = { day: 'https://tiles.openfreemap.org/styles/liberty', night: 'https://tiles.openfreemap.org/styles/dark' };
+  let base = $state<'none' | 'vector' | 'raster'>('none');
+  let baseFor = '';
 
   const off = (px: number) => ['*', ['get', 'off'], px];
   const OFFSET = ['interpolate', ['linear'], ['zoom'], 14, off(1.5), 17, off(5), 19, off(12)];
 
+  /** Nos couches (tracé de la tournée), posées par-dessus n'importe quel fond. */
+  function overlay(): { sources: Record<string, unknown>; layers: unknown[] } {
+    const line = (id: string, state: string, width: number, opacity: number, color: unknown) => ({
+      id,
+      type: 'line',
+      source: 'route',
+      filter: ['==', ['get', 'state'], state],
+      layout: { 'line-cap': 'round', 'line-join': 'round' },
+      paint: { 'line-color': color, 'line-width': width, 'line-opacity': opacity, 'line-offset': OFFSET },
+    });
+    const done = isDark() ? COLORS.dark.done : COLORS.light.done;
+    return {
+      sources: { route: { type: 'geojson', data: routes } },
+      layers: [line('route-done', 'done', 5, 0.75, done), line('route-later', 'later', 5, 0.5, sideColor()), line('route-next', 'next', 9, 1, sideColor())],
+    };
+  }
+
+  function rasterStyle() {
+    const dark = isDark();
+    return {
+      version: 8,
+      sources: { ign: { type: 'raster', tiles: [TILE_URL], tileSize: 256, maxzoom: 18 } },
+      layers: [
+        { id: 'bg', type: 'background', paint: { 'background-color': dark ? '#172133' : '#dce2e7' } },
+        {
+          id: 'ign',
+          type: 'raster',
+          source: 'ign',
+          paint: dark
+            ? { 'raster-fade-duration': 0, 'raster-brightness-min': 0.92, 'raster-brightness-max': 0.1, 'raster-hue-rotate': 180, 'raster-saturation': -0.55 }
+            : { 'raster-fade-duration': 0 },
+        },
+      ],
+    };
+  }
+
+  /** Remplace le fond en gardant nos couches par-dessus. */
+  function setBase(style: any, kind: 'vector' | 'raster') {
+    if (!map) return;
+    const ov = overlay();
+    style.sources = { ...style.sources, ...ov.sources };
+    style.layers = [...style.layers, ...ov.layers];
+    base = kind;
+    map.setStyle(style, { diff: false });
+  }
+
+  async function loadBase() {
+    if (!map) return;
+    const want = isDark() ? 'night' : 'day';
+    if (baseFor === want && base !== 'none') return;
+    baseFor = want;
+    try {
+      const ctl = new AbortController();
+      const timer = setTimeout(() => ctl.abort(), 6000);
+      const r = await fetch(VECTOR[want], { signal: ctl.signal });
+      clearTimeout(timer);
+      if (!r.ok) throw new Error();
+      setBase(await r.json(), 'vector');
+    } catch {
+      setBase(rasterStyle(), 'raster');
+    }
+  }
+
+  function applyTheme() {
+    if (!map || !ready) return;
+    loadBase();
+  }
+
   onMount(() => {
     map = new MlMap({
       container: el,
-      style: {
-        version: 8,
-        sources: {
-          // maxzoom 18 : au-delà on agrandit les images déjà là (4× moins de téléchargements)
-          ign: { type: 'raster', tiles: [TILE_URL], tileSize: 256, maxzoom: 18 },
-        },
-        layers: [
-          { id: 'bg', type: 'background', paint: { 'background-color': '#dce2e7' } },
-          { id: 'ign', type: 'raster', source: 'ign', paint: { 'raster-fade-duration': 0 } },
-        ],
-      },
+      // fond neutre le temps de charger le vrai fond
+      style: { version: 8, sources: {}, layers: [{ id: 'bg', type: 'background', paint: { 'background-color': isDark() ? '#172133' : '#e8ecef' } }] },
       center: [2.4, 46.6],
       zoom: 5,
       attributionControl: false,
@@ -127,34 +181,16 @@
     map.on('zoom', zoomClass);
     zoomClass();
     map.on('load', () => {
-      map!.addSource('route', { type: 'geojson', data: routes });
-      map!.addLayer({
-        id: 'route-done',
-        type: 'line',
-        source: 'route',
-        filter: ['==', ['get', 'state'], 'done'],
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': COLORS.light.done, 'line-width': 5, 'line-opacity': 0.75, 'line-offset': OFFSET as never },
-      });
-      map!.addLayer({
-        id: 'route-later',
-        type: 'line',
-        source: 'route',
-        filter: ['==', ['get', 'state'], 'later'],
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': sideColor() as never, 'line-width': 5, 'line-opacity': 0.45, 'line-offset': OFFSET as never },
-      });
-      map!.addLayer({
-        id: 'route-next',
-        type: 'line',
-        source: 'route',
-        filter: ['==', ['get', 'state'], 'next'],
-        layout: { 'line-cap': 'round', 'line-join': 'round' },
-        paint: { 'line-color': sideColor() as never, 'line-width': 9, 'line-opacity': 1, 'line-offset': OFFSET as never },
-      });
+      const ov = overlay();
+      for (const [k, v] of Object.entries(ov.sources)) map!.addSource(k, v as never);
+      for (const l of ov.layers) map!.addLayer(l as never);
       ready = true;
-      applyTheme();
       fitIfNeeded();
+      loadBase();
+    });
+    // après chaque changement de fond, on remet les dernières données du tracé
+    map.on('style.load', () => {
+      (map!.getSource('route') as unknown as { setData?: (d: unknown) => void })?.setData?.(routes);
     });
     const stopFollow = (e: { originalEvent?: unknown }) => {
       if (e.originalEvent) following = false;
@@ -322,7 +358,7 @@
 </script>
 
 <div class="tmap" bind:this={el}></div>
-<span class="attrib">© IGN</span>
+<span class="attrib">{base === 'vector' ? '© OpenFreeMap © OpenMapTiles © OpenStreetMap' : '© IGN'}</span>
 {#if followMode && !following && position}
   <button class="recenter" onclick={recenter}>Recentrer</button>
 {/if}
