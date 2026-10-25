@@ -2,7 +2,7 @@
   export interface RouteProps {
     side: 'pair' | 'impair' | 'both' | 'none';
     off: number; // +1 droite, -1 gauche, 0 milieu
-    state: 'done' | 'next' | 'later';
+    state: 'done' | 'next' | 'later' | 'join';
   }
   export interface StopPin {
     id: string;
@@ -114,7 +114,14 @@
     const done = isDark() ? COLORS.dark.done : COLORS.light.done;
     return {
       sources: { route: { type: 'geojson', data: routes } },
-      layers: [line('route-done', 'done', 5, 0.75, done), line('route-later', 'later', 5, 0.5, sideColor()), line('route-next', 'next', 9, 1, sideColor())],
+      layers: [
+        line('route-done', 'done', 5, 0.75, done),
+        line('route-later', 'later', 5, 0.5, sideColor()),
+        line('route-next', 'next', 9, 1, sideColor()),
+        // chemin pour rejoindre la tournée : pointillés jaunes bordés
+        { ...line('route-join-case', 'join', 10, 0.9, isDark() ? '#0e1626' : '#15233f'), paint: { 'line-color': isDark() ? '#0e1626' : '#15233f', 'line-width': 10, 'line-opacity': 0.85 } },
+        { ...line('route-join', 'join', 6, 1, '#ffc20e'), paint: { 'line-color': '#ffc20e', 'line-width': 6, 'line-dasharray': [1.2, 1.2] } },
+      ],
     };
   }
 

@@ -16,6 +16,9 @@
   import NoteSheet from '../components/NoteSheet.svelte';
   import ThemeButton from '../components/ThemeButton.svelte';
   import { prefetchTiles } from '../lib/tiles';
+  import { joinRoute, type JoinRoute } from '../lib/join';
+  import { AreaLoader } from '../lib/area';
+  import { pointAt, projectDetailed } from '../lib/geo';
 
   let { tourneeId }: { tourneeId: string } = $props();
   let t = $state<Tournee | null>(null);
@@ -34,6 +37,12 @@
   let follower: RouteFollower | null = null;
   let filter: PositionFilter | null = null;
   let stopGps: (() => void) | null = null;
+  // Rejoindre la tournée (depuis le centre de tri, ou après une interruption)
+  let join = $state.raw<JoinRoute | null>(null);
+  let joinLeft = $state(0);
+  let joinBusy = false;
+  let joinAt = 0;
+  const area = new AreaLoader(() => {});
 
   onMount(async () => {
     t = (await getTournee(tourneeId)) ?? null;
@@ -96,9 +105,41 @@
         done = n;
         save();
       }
+      join = null;
     } else {
       pos = smooth;
       heading = filter.heading ?? heading;
+      updateJoin(smooth);
+    }
+  }
+
+  /** Point de la tournée à rejoindre : le départ, ou l'endroit où on s'est arrêté. */
+  function target(): LL | null {
+    if (!route || route.line.length < 2) return null;
+    return pointAt(route.line, along).p;
+  }
+
+  async function updateJoin(p: LL) {
+    const to = target();
+    if (!to || !t) return;
+    if (dist(p, to) < 35) return (join = null);
+    if (join) {
+      const pr = projectDetailed(p, join.line);
+      joinLeft = Math.max(0, join.meters * (1 - pr.along / Math.max(1, pr.total)));
+      // encore sur le chemin prévu : on garde ; sinon on recalcule (au plus toutes les 30 s)
+      if (pr.d < 60 || Date.now() - joinAt < 30000) return;
+    }
+    if (joinBusy) return;
+    joinBusy = true;
+    joinAt = Date.now();
+    area.ensure(p.lat, p.lon);
+    area.ensure(to.lat, to.lon);
+    try {
+      const j = await joinRoute(p, to, t.mode, area.roads);
+      join = j;
+      joinLeft = j.meters;
+    } finally {
+      joinBusy = false;
     }
   }
 
@@ -128,7 +169,17 @@
     save();
   }
 
-  const features = $derived(t ? guideFeatures(t, along) : { type: 'FeatureCollection' as const, features: [] });
+  const features = $derived.by(() => {
+    if (!t) return { type: 'FeatureCollection' as const, features: [] };
+    const fc = guideFeatures(t, along);
+    if (join)
+      fc.features.push({
+        type: 'Feature',
+        geometry: { type: 'LineString', coordinates: join.line.map((p) => [p.lon, p.lat]) },
+        properties: { side: 'none', off: 0, state: 'join' },
+      });
+    return fc;
+  });
   const pins = $derived<StopPin[]>(
     stops.map((a) => ({
       id: a.id,
@@ -171,6 +222,17 @@
     <section class="card info" bind:clientHeight={cardH}>
       {#if gpsError}
         <GpsHelp error={gpsError} />
+      {:else if join && cur}
+        <div class="joinrow">
+          <span class="joinicon" aria-hidden="true">
+            <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" stroke-linejoin="round"><path d="M5 19L19 5M19 5h-8M19 5v8" /></svg>
+          </span>
+          <div class="nextcol">
+            <p class="street cond">Rejoindre ta tournée</p>
+            <p class="sub">{formatDist(joinLeft).replace(/^à /, '')} jusqu'au {along > 1 ? 'point de reprise' : 'départ'}, {lc(cur.street)}</p>
+          </div>
+        </div>
+        <p class="sub small">Suis les pointillés jaunes. Le guidage des arrêts démarre tout seul en arrivant.{join.source === 'direct' ? ' (Itinéraire indisponible : ligne droite.)' : ''}</p>
       {:else if cur}
         <div class="nextrow">
           <span class="num cond">{label(cur)}</span>
@@ -345,6 +407,26 @@
   .note svg {
     flex: none;
     margin-top: 1px;
+  }
+  .joinrow {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+  }
+  .joinicon {
+    width: 78px;
+    height: 78px;
+    border-radius: 16px;
+    background: var(--yellow);
+    color: var(--on-yellow);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    box-shadow: inset 0 0 0 4px var(--on-yellow);
+    flex: none;
+  }
+  .small {
+    font-size: 14px;
   }
   .then {
     display: flex;
