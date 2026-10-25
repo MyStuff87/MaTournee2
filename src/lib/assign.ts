@@ -4,7 +4,7 @@ import type { Addr, LL, Segment, SegSide } from './types';
 import { AddressIndex, isEven, sortByNum } from './addressIndex';
 import { RoadIndex } from './roads';
 import { matchToRoads } from './match';
-import { bearing, dist, projectDetailed, sideOf, simplify } from './geo';
+import { bearing, dist, lineLength, projectDetailed, sideOf, simplify, subLine } from './geo';
 
 /** Distance max entre le trajet et une adresse « devant laquelle on passe ». */
 export const PASS_RADIUS = 35;
@@ -222,4 +222,68 @@ export function migrateSegment(s: Segment, addrs: Record<string, Addr> | ((id: s
   const get = typeof addrs === 'function' ? addrs : (id: string) => addrs[id];
   const pts = s.addrIds.map(get).filter((a): a is Addr => !!a).map((a) => ({ lat: a.lat, lon: a.lon }));
   return { ...s, path: simplify(pts, STRAIGHTEN) };
+}
+
+/**
+ * Découpe un long tronçon (trace importée) en un tronçon par rue, dans
+ * l'ordre du passage ; les longs trajets sans adresse deviennent des passages.
+ * Chaque tronçon est « les deux côtés » : il reste à corriger ceux qui ne le sont pas.
+ */
+export function splitByStreets(seg: Segment, get: (id: string) => Addr | undefined, uid: () => string): Segment[] {
+  const path = seg.path ?? [];
+  if (path.length < 2 || !seg.addrIds.length) return [{ ...seg, autoSplit: false }];
+  const items = seg.addrIds
+    .map((id) => get(id))
+    .filter((a): a is Addr => !!a)
+    .map((a) => ({ a, along: projectDetailed(a, path).along }))
+    .sort((x, y) => x.along - y.along);
+  // séries d'adresses consécutives d'une même rue
+  const runs: { key: string; items: typeof items }[] = [];
+  for (const it of items) {
+    const last = runs[runs.length - 1];
+    if (last && last.key === it.a.streetKey) last.items.push(it);
+    else runs.push({ key: it.a.streetKey, items: [it] });
+  }
+  // une adresse isolée au milieu d'une autre rue (angle) : rattachée à la série d'avant
+  for (let i = 1; i < runs.length - 1; i++)
+    if (runs[i].items.length === 1 && runs[i - 1].key === runs[i + 1].key) {
+      runs[i - 1].items.push(...runs[i].items, ...runs[i + 1].items);
+      runs.splice(i, 2);
+      i--;
+    }
+  const total = lineLength(path);
+  const GAP = 150; // au-delà, sans adresse : simple passage
+  const out: Segment[] = [];
+  const mk = (side: Segment['side'], from: number, to: number, list: typeof items): Segment => {
+    const p = subLine(path, from, to);
+    const main = list[0]?.a;
+    return {
+      id: uid(),
+      side,
+      path: p,
+      raw: p,
+      addrIds: list.map((x) => x.a.id),
+      streetKey: main?.streetKey ?? '',
+      street: main?.street ?? '',
+      city: main?.city ?? '',
+      streets: main ? [main.street] : [],
+    };
+  };
+  // bornes de chaque série : au milieu entre deux rues proches, ou 15 m autour
+  // des adresses quand un long trajet sans adresse les sépare (devient un passage)
+  const bounds = runs.map((r) => ({ first: r.items[0].along, last: r.items[r.items.length - 1].along, start: 0, end: 0 }));
+  bounds.forEach((b, i) => {
+    const prev = bounds[i - 1];
+    const next = bounds[i + 1];
+    b.start = prev ? (b.first - prev.last > GAP ? b.first - 15 : (prev.last + b.first) / 2) : b.first > GAP ? b.first - 15 : 0;
+    b.end = next ? (next.first - b.last > GAP ? b.last + 15 : (b.last + next.first) / 2) : total - b.last > GAP ? b.last + 15 : total;
+  });
+  let cursor = 0;
+  bounds.forEach((b, i) => {
+    if (b.start > cursor + 1) out.push(mk('none', cursor, b.start, []));
+    out.push(mk('both', b.start, b.end, runs[i].items));
+    cursor = b.end;
+  });
+  if (total - cursor > 1) out.push(mk('none', cursor, total, []));
+  return out.filter((s) => (s.path?.length ?? 0) >= 2);
 }

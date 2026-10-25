@@ -4,7 +4,8 @@
   import { deleteTournee, getTournee, saveTournee } from '../lib/db';
   import { exportTournees } from '../lib/backup';
   import { AddressIndex, isEven, label, sortByNum } from '../lib/addressIndex';
-  import { assignAll, assignSegment, migrateSegment } from '../lib/assign';
+  import { assignAll, assignSegment, migrateSegment, splitByStreets } from '../lib/assign';
+  import { uid } from '../lib/recorder';
   import { cellsAround, loadCell } from '../lib/ban';
   import { loadRoadCell, RoadIndex } from '../lib/roads';
   import { lineLength, projectDetailed } from '../lib/geo';
@@ -35,7 +36,9 @@
 
   onMount(async () => {
     t = (await getTournee(tourneeId)) ?? null;
-    if (!t) go({ name: 'home' });
+    if (!t) return go({ name: 'home' });
+    // tournée importée (fichier GPX) : aucune adresse encore, on les calcule tout de suite
+    if (t.segments.some((s) => s.autoSplit)) recompute();
   });
 
   function save() {
@@ -103,14 +106,21 @@
     for (const s of segs)
       for (const [k, p] of (s.raw ?? s.path ?? []).entries()) if (k % 20 === 0) cellsAround(p.lat, p.lon).forEach((c) => cells.add(c));
     let offline = false;
-    await Promise.all(
-      [...cells].map(async (c) => {
+    // 6 zones à la fois, pour ne pas saturer le réseau sur une grande tournée
+    const queue = [...cells];
+    progress = { done: 0, total: queue.length };
+    const worker = async () => {
+      while (queue.length) {
+        const c = queue.shift()!;
         const [a, r] = await Promise.all([loadCell(c), loadRoadCell(c)]);
         if (a) idx.add(a);
         else offline = true;
         if (r) roads.add(r);
-      }),
-    );
+        progress = { done: (progress?.done ?? 0) + 1, total: progress?.total ?? 1 };
+      }
+    };
+    await Promise.all(Array.from({ length: 6 }, worker));
+    progress = null;
     return { idx, roads, offline };
   }
 
@@ -142,12 +152,15 @@
 
   // Recalcule toutes les adresses à partir des tracés (utile si le réseau manquait à l'enregistrement).
   let recomputing = $state(false);
+  let progress = $state<{ done: number; total: number } | null>(null);
   async function recompute() {
     if (!t) return;
     recomputing = true;
     const { idx, roads, offline } = await loadArea(t.segments);
     const before = new Set(t.segments.flatMap((s) => s.addrIds)).size;
     t.segments = assignAll($state.snapshot(t.segments) as Segment[], idx, roads);
+    // trace importée : un tronçon par rue
+    t.segments = t.segments.flatMap((s) => (s.autoSplit ? splitByStreets(s, (id) => idx.byId.get(id), uid) : [s]));
     for (const seg of t.segments) keepStreets(idx, seg);
     save();
     recomputing = false;
@@ -287,7 +300,7 @@
       <button class="btn btn-ghost" onclick={() => go({ name: 'record', tourneeId: t!.id })}>Continuer à pied</button>
       <button class="btn btn-ghost" onclick={() => go({ name: 'draw', tourneeId: t!.id })}>Continuer en traçant</button>
     </div>
-    <button class="btn btn-ghost" onclick={recompute} disabled={recomputing}>{recomputing ? 'Calcul en cours…' : 'Recalculer les adresses depuis le tracé'}</button>
+    <button class="btn btn-ghost" onclick={recompute} disabled={recomputing}>{recomputing ? (progress ? `Chargement du quartier : ${Math.round((progress.done / Math.max(1, progress.total)) * 100)} %` : 'Calcul des adresses…') : 'Recalculer les adresses depuis le tracé'}</button>
     <button class="btn btn-primary" onclick={() => { setCurrent(t!.id); go({ name: 'home' }); }}>C'est bon</button>
     <div class="foot">
       <button class="link" onclick={() => exportTournees(t!)}>Envoyer cette tournée</button>

@@ -42,6 +42,8 @@ export interface Segment {
   city: string;
   /** toutes les rues traversées en distribuant */
   streets?: string[];
+  /** trace importée (GPX) : à découper automatiquement par rue au premier calcul */
+  autoSplit?: boolean;
 }
 
 export interface Tournee {

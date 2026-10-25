@@ -39,7 +39,15 @@
     const f = (e.target as HTMLInputElement).files?.[0];
     if (!f) return;
     try {
-      const n = await importFile(f);
+      const ids = await importFile(f);
+      const n = ids.length;
+      if (n && /\.gpx$/i.test(f.name)) {
+        // trace GPS : on ouvre la tournée, ses adresses se calculent tout de suite
+        setCurrent(ids[0]);
+        toast('Trace importée : calcul des adresses en cours');
+        go({ name: 'review', tourneeId: ids[0] });
+        return;
+      }
       toast(n ? `${n} tournée${n > 1 ? 's' : ''} importée${n > 1 ? 's' : ''}` : 'Aucune tournée dans ce fichier');
       refresh();
     } catch {
@@ -117,7 +125,7 @@
     {/if}
     <button class="link" onclick={() => fileInput.click()}>Importer une tournée</button>
     <button class="link" onclick={() => { logout(); location.reload(); }}>Se déconnecter</button>
-    <input bind:this={fileInput} type="file" accept=".json,application/json" class="sr-only" onchange={onImport} />
+    <input bind:this={fileInput} type="file" accept=".json,.gpx,application/json,application/gpx+xml" class="sr-only" onchange={onImport} />
   </footer>
 </main>
 
