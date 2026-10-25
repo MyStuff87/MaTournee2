@@ -1,3 +1,8 @@
+export interface LL {
+  lat: number;
+  lon: number;
+}
+
 export type Side = 'pair' | 'impair' | 'both';
 export type Mode = 'pied' | 'velo' | 'voiture';
 
@@ -14,14 +19,24 @@ export interface Addr {
   lon: number;
 }
 
+/** Ce que fait le facteur sur un tronçon ; « none » = simple passage. */
+export type SegSide = Side | 'none';
+
 export interface Segment {
   id: string;
+  side: SegSide;
+  /** tracé lissé et simplifié (lignes droites), dans le sens de passage */
+  path?: LL[];
+  /** positions lissées brutes, pour recalculer les adresses */
+  raw?: LL[];
+  /** adresses dans l'ordre de passage */
+  addrIds: string[];
+  /** rue principale (affichage) */
   streetKey: string;
   street: string;
   city: string;
-  side: Side;
-  /** adresses dans l'ordre de passage */
-  addrIds: string[];
+  /** toutes les rues traversées en distribuant */
+  streets?: string[];
 }
 
 export interface Tournee {

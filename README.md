@@ -2,13 +2,13 @@
 
 Appli de guidage de tournée pour facteur (à pied, à vélo ou en voiture).
 
-- **Enregistrer** une tournée à vide : en entrant dans une rue, on choisit le côté
-  (pair, impair ou les deux). Les adresses officielles (Base Adresse Nationale)
-  devant lesquelles on passe sont ajoutées automatiquement. « Fin du tronçon »
-  permet de ne faire qu'un bout de rue et de revenir faire la suite plus tard.
+- **Enregistrer** une tournée à vide : à chaque changement, on touche Pair, Impair,
+  Les deux ou Rien ; un nouveau tronçon commence à cet endroit. La position GPS est
+  lissée (filtre de Kalman) puis redressée en lignes droites, et les adresses
+  officielles (Base Adresse Nationale) longées sont retrouvées automatiquement.
 - **Préparer la journée** : on touche les numéros qui ont du courrier.
-- **Guidage** : le prochain arrêt en très grand, les suivants, « Livré » / « Passer »,
-  avec avance automatique quand on passe devant.
+- **Guidage** : carte qui tourne façon GPS (MapLibre), lignes du côté distribué,
+  position collée au parcours, avance automatique, rien à valider.
 - **Où suis-je ?** : la rue et les numéros pair / impair autour de soi.
 
 Tout reste sur le téléphone et fonctionne hors-ligne une fois les adresses chargées.
@@ -30,5 +30,5 @@ npm install
 npm run dev
 ```
 
-Svelte 5 + Vite, PWA (vite-plugin-pwa), cartes Plan IGN (Leaflet), adresses via
+Svelte 5 + Vite, PWA (vite-plugin-pwa), cartes Plan IGN (MapLibre GL), adresses via
 le WFS `BAN.DATA.GOUV:ban` de la Géoplateforme.

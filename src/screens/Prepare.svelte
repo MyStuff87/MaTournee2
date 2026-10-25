@@ -3,7 +3,7 @@
   import { go, today } from '../lib/app.svelte';
   import { getSession, getTournee, saveSession } from '../lib/db';
   import { label } from '../lib/addressIndex';
-  import type { Addr, DaySession, Segment, Tournee } from '../lib/types';
+  import type { Addr, DaySession, Segment, Side, Tournee } from '../lib/types';
   import Plaque from '../components/Plaque.svelte';
   import SidePill from '../components/SidePill.svelte';
   import { prefetchTiles } from '../lib/tiles';
@@ -97,7 +97,7 @@
         <span class="ord cond">{i + 1}</span>
         <span class="grow"><Plaque text={seg.street} size="s" upper /></span>
         <button class="pill-btn" onclick={() => toggleSection(addrs)} aria-label="Tout cocher pour {seg.street}">
-          <SidePill side={seg.side} />
+          <SidePill side={seg.side as Side} />
         </button>
       </div>
       <div class="grid">

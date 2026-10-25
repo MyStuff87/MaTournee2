@@ -82,8 +82,9 @@ export function demoTrack(step = 1.4): LL[] {
     const n = Math.max(1, Math.round(len / step));
     for (let k = 0; k < n; k++) {
       const t = k / n;
-      const jx = Math.sin((i * 31 + k) * 1.7) * 2;
-      const jy = Math.cos((i * 17 + k) * 1.3) * 2;
+      // GPS en zigzag : ±6 m
+      const jx = Math.sin((i * 31 + k) * 1.7) * 4 + Math.sin(k * 0.37) * 2;
+      const jy = Math.cos((i * 17 + k) * 1.3) * 4 + Math.cos(k * 0.29) * 2;
       pts.push(toLL(ax + (bx - ax) * t + jx, ay + (by - ay) * t + jy));
     }
   }
@@ -96,7 +97,7 @@ export function startDemoGPS(onFix: (f: Fix) => void, speed = 1): () => void {
   let i = 0;
   const h = setInterval(() => {
     const p = pts[Math.min(i, pts.length - 1)];
-    onFix({ lat: p.lat, lon: p.lon, acc: 5, t: Date.now(), speed: 1.4 });
+    onFix({ lat: p.lat, lon: p.lon, acc: 6, t: i * 1000, speed: 1.4 });
     i++;
   }, 1000 / speed);
   return () => clearInterval(h);

@@ -1,45 +1,103 @@
-// Suit la position du facteur le long du tracé enregistré de sa tournée,
-// pour séparer le chemin déjà fait du chemin à faire.
-import { dist, type LL } from './geo';
+// Le parcours d'une tournée mis bout à bout, et le suivi de la position
+// du facteur le long de ce parcours (collage au tracé façon GPS).
+import type { Addr, LL, Tournee } from './types';
+import { bearing, dist, distToSeg, projectDetailed } from './geo';
+import { migrateSegment } from './assign';
 
-export class TrackFollower {
-  idx = 0;
+export interface Route {
+  line: LL[];
+  /** abscisse cumulée de chaque sommet */
+  cum: number[];
+  /** abscisse de début de chaque tronçon */
+  segStart: number[];
+  /** abscisse de chaque adresse sur le parcours */
+  stopAlong: Map<string, number>;
+}
+
+export function buildRoute(t: Tournee): Route {
+  const line: LL[] = [];
+  const segStart: number[] = [];
+  const stopAlong = new Map<string, number>();
+  let acc = 0;
+  for (const s0 of t.segments) {
+    const s = migrateSegment(s0, t.addrs);
+    const path = s.path && s.path.length >= 2 ? s.path : [];
+    if (line.length && path.length) acc += dist(line[line.length - 1], path[0]);
+    segStart.push(acc);
+    for (const id of s.addrIds) {
+      const a = t.addrs[id];
+      if (a) stopAlong.set(id, acc + (path.length ? projectDetailed(a, path).along : 0));
+    }
+    for (let i = 0; i < path.length; i++) {
+      if (i > 0) acc += dist(path[i - 1], path[i]);
+      line.push(path[i]);
+    }
+  }
+  const cum: number[] = [0];
+  for (let i = 1; i < line.length; i++) cum.push(cum[i - 1] + dist(line[i - 1], line[i]));
+  return { line, cum, segStart, stopAlong };
+}
+
+export interface FollowResult {
+  along: number;
+  /** position collée au parcours (null si on en est loin) */
+  snapped: LL | null;
+  /** direction du parcours à cet endroit */
+  heading: number | null;
+  offRoute: boolean;
+}
+
+export class RouteFollower {
+  along: number;
   private started = false;
+  private lost = 0;
 
-  constructor(public track: LL[]) {}
-
-  update(p: LL): number {
-    const t = this.track;
-    if (t.length === 0) return 0;
-    // Au début : recherche partout. Ensuite : seulement un peu en arrière et
-    // devant, pour ne pas sauter quand le tracé repasse au même endroit.
-    const from = this.started ? Math.max(0, this.idx - 40) : 0;
-    const to = this.started ? Math.min(t.length - 1, this.idx + 400) : t.length - 1;
-    let best = this.idx;
-    let bd = Infinity;
-    for (let i = from; i <= to; i++) {
-      const d = dist(p, t[i]);
-      if (d < bd) {
-        bd = d;
-        best = i;
-      }
-    }
-    if (bd < 45) {
-      this.idx = best;
-      this.started = true;
-    }
-    return this.idx;
+  /** @param startAlong où reprendre (ex. après une pause) */
+  constructor(public route: Route, startAlong = 0, private snapDist = 28) {
+    this.along = startAlong;
   }
 
-  /** Index du point situé à `meters` devant la position. */
-  ahead(meters: number): number {
-    const t = this.track;
-    let acc = 0;
-    let i = this.idx;
-    while (i < t.length - 1 && acc < meters) {
-      acc += dist(t[i], t[i + 1]);
-      i++;
+  /**
+   * On cherche, en avançant dans l'ordre du parcours, le premier passage
+   * proche de la position : on ne saute jamais à un passage ultérieur
+   * (impasse aller / retour, rue faite en deux fois…).
+   */
+  update(p: LL): FollowResult {
+    const { line, cum } = this.route;
+    if (line.length < 2) return { along: 0, snapped: null, heading: null, offRoute: true };
+    // Au départ on cherche près du point de reprise ; si on reste longtemps
+    // sans retrouver le parcours, on accepte de le rejoindre plus loin.
+    const lost = this.lost > 40;
+    const lo = this.along - (this.started ? 30 : 60);
+    const hi = lost ? Infinity : this.along + (this.started ? 400 : 150);
+    let best: { d: number; along: number; i: number; t: number } | null = null;
+    for (let i = 0; i < line.length - 1; i++) {
+      if (cum[i + 1] < lo) continue;
+      if (cum[i] > hi) break;
+      const { d, t } = distToSeg(p, line[i], line[i + 1]);
+      if (d <= this.snapDist) {
+        if (!best || d < best.d) best = { d, along: cum[i] + t * (cum[i + 1] - cum[i]), i, t };
+      } else if (best) break; // fin du premier passage proche
     }
-    return i;
+    if (!best) {
+      this.lost++;
+      return { along: this.along, snapped: null, heading: null, offRoute: true };
+    }
+    this.lost = 0;
+    this.started = true;
+    this.along = Math.max(best.along, this.along - 30);
+    const a = line[best.i];
+    const b = line[best.i + 1];
+    return {
+      along: best.along,
+      snapped: { lat: a.lat + (b.lat - a.lat) * best.t, lon: a.lon + (b.lon - a.lon) * best.t },
+      heading: bearing(a, b),
+      offRoute: false,
+    };
   }
+}
+
+/** Arrêts déjà dépassés sur le parcours. */
+export function passedStops(stops: Addr[], route: Route, along: number): string[] {
+  return stops.filter((a) => (route.stopAlong.get(a.id) ?? Infinity) <= along + 2).map((a) => a.id);
 }

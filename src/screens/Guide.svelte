@@ -3,12 +3,14 @@
   import { go, today, toast } from '../lib/app.svelte';
   import { getSession, getTournee, saveSession, saveTournee } from '../lib/db';
   import { AddressIndex, isEven, label } from '../lib/addressIndex';
-  import { Guide, stopsFor } from '../lib/guide';
-  import { TrackFollower } from '../lib/follow';
+  import { stopsFor } from '../lib/guide';
+  import { buildRoute, passedStops, RouteFollower, type Route } from '../lib/follow';
+  import { PositionFilter } from '../lib/smooth';
+  import { guideFeatures } from '../lib/mapdata';
   import { keepAwake, watchGPS, type GpsError } from '../lib/gps';
-  import { bearing, dist, formatDist, type LL } from '../lib/geo';
+  import { dist, formatDist, type LL } from '../lib/geo';
   import type { Addr, DaySession, Fix, Tournee } from '../lib/types';
-  import GuideMap from '../components/GuideMap.svelte';
+  import TourMap, { type StopPin } from '../components/TourMap.svelte';
   import SidePill from '../components/SidePill.svelte';
   import GpsHelp from '../components/GpsHelp.svelte';
   import NoteSheet from '../components/NoteSheet.svelte';
@@ -21,14 +23,15 @@
   let done = $state(new Set<string>());
   let fix = $state<Fix | null>(null);
   let gpsError = $state<GpsError>(null);
+  let pos = $state<LL | null>(null);
   let heading = $state<number | null>(null);
-  let trackIdx = $state(0);
-  let aheadIdx = $state(0);
+  let along = $state(0);
+  let offRoute = $state(false);
   let cardH = $state(0);
   const index = new AddressIndex();
-  let guide: Guide | null = null;
-  let follower: TrackFollower | null = null;
-  let lastMove: LL | null = null;
+  let route: Route | null = null;
+  let follower: RouteFollower | null = null;
+  let filter: PositionFilter | null = null;
   let stopGps: (() => void) | null = null;
 
   onMount(async () => {
@@ -39,8 +42,12 @@
     done = new Set(session.done);
     stops = stopsFor(t, new Set(session.checked));
     index.add(Object.values(t.addrs));
-    guide = new Guide(t.mode);
-    follower = new TrackFollower(t.track);
+    route = buildRoute(t);
+    // reprise : on repart après le dernier arrêt fait
+    const resume = Math.max(0, ...[...done].map((id) => route!.stopAlong.get(id) ?? 0));
+    along = resume;
+    follower = new RouteFollower(route, resume);
+    filter = new PositionFilter(t.mode);
     keepAwake(true);
     stopGps = watchGPS(onFix, (e) => (gpsError = e));
   });
@@ -53,10 +60,14 @@
   const pending = $derived(stops.filter((a) => !done.has(a.id)));
   const cur = $derived(pending[0] ?? null);
   const next = $derived(pending.slice(1, 4));
-  const pos: LL | null = $derived(fix ? { lat: fix.lat, lon: fix.lon } : null);
-  const distLabel = $derived(pos && cur ? formatDist(dist(pos, cur)) : '');
   const pct = $derived(stops.length ? Math.round(((stops.length - pending.length) / stops.length) * 100) : 0);
   const here = $derived(pos ? index.nearest(pos, 30) : null);
+  const distLabel = $derived.by(() => {
+    if (!pos || !cur || !route) return '';
+    const sa = route.stopAlong.get(cur.id);
+    if (!offRoute && sa !== undefined) return formatDist(Math.max(0, sa - along));
+    return formatDist(dist(pos, cur));
+  });
 
   function save() {
     if (!session) return;
@@ -65,33 +76,34 @@
   }
 
   function onFix(f: Fix) {
-    if (f.acc > 60) return;
-    const p = { lat: f.lat, lon: f.lon };
-    if (!lastMove) lastMove = p;
-    else if (dist(lastMove, p) > 6) {
-      heading = bearing(lastMove, p);
-      lastMove = p;
-    }
+    if (f.acc > 60 || !filter || !follower || !route) return;
     fix = f;
-    if (follower) {
-      trackIdx = follower.update(p);
-      aheadIdx = follower.ahead(350);
-    }
-    if (!guide) return;
-    const ids = guide.onFix(p, pending);
-    if (ids.length) {
-      const n = new Set(done);
-      for (const id of ids) n.add(id);
-      done = n;
-      save();
+    const smooth = filter.update(f);
+    const r = follower.update(smooth);
+    offRoute = r.offRoute;
+    if (r.snapped) {
+      // Collé au parcours : lignes droites, direction du parcours.
+      pos = r.snapped;
+      heading = r.heading;
+      along = r.along;
+      const passed = passedStops(pending, route, along);
+      if (passed.length) {
+        const n = new Set(done);
+        for (const id of passed) n.add(id);
+        done = n;
+        save();
+      }
+    } else {
+      pos = smooth;
+      heading = filter.heading ?? heading;
     }
   }
 
   // Toucher un numéro sur la carte : ouvre sa note. Rien à valider, tout avance seul.
   let sheetAddr = $state<Addr | null>(null);
 
-  function onStopTap(a: Addr) {
-    sheetAddr = a;
+  function onStopTap(id: string) {
+    sheetAddr = t?.addrs[id] ?? null;
   }
 
   function saveNote(a: Addr, text: string) {
@@ -108,8 +120,22 @@
 
   function restart() {
     done = new Set();
+    along = 0;
+    if (route) follower = new RouteFollower(route, 0);
     save();
   }
+
+  const features = $derived(t ? guideFeatures(t, along) : { type: 'FeatureCollection' as const, features: [] });
+  const pins = $derived<StopPin[]>(
+    stops.map((a) => ({
+      id: a.id,
+      label: label(a),
+      lat: a.lat,
+      lon: a.lon,
+      state: a.id === cur?.id ? 'next' : done.has(a.id) ? 'done' : 'todo',
+      note: !!t?.notes?.[a.id],
+    })),
+  );
 
   const short = (s: string) =>
     s.replace(/^(rue|avenue|boulevard|place|impasse|allée|chemin|route|quai|cours)\s+(de la |du |des |de l'|d'|de )?/i, '');
@@ -118,17 +144,13 @@
 
 {#if t}
   <div class="guide">
-    <GuideMap
-      track={t.track}
-      {trackIdx}
-      {aheadIdx}
-      {stops}
-      {done}
-      nextId={cur?.id ?? null}
+    <TourMap
+      routes={features}
+      stops={pins}
       position={pos}
       {heading}
-      bottomInset={cardH}
-      notes={t.notes ?? {}}
+      zoom={t.mode === 'voiture' ? 17 : 18}
+      padBottom={cardH}
       {onStopTap}
     />
 
@@ -212,7 +234,7 @@
     display: flex;
     align-items: center;
     gap: 10px;
-    z-index: 1100;
+    z-index: 30;
   }
   .top .icon-btn {
     box-shadow: 0 2px 10px rgba(21, 35, 63, 0.18);
@@ -257,7 +279,7 @@
     left: 10px;
     right: 10px;
     bottom: calc(var(--safe-bottom) + 10px);
-    z-index: 1100;
+    z-index: 30;
     border-radius: 26px;
     padding: 16px 18px;
     display: flex;

@@ -1,30 +1,26 @@
 <script lang="ts">
   import { onDestroy, onMount } from 'svelte';
-  import { app, go, setCurrent, toast } from '../lib/app.svelte';
+  import { go, setCurrent, toast } from '../lib/app.svelte';
   import { getTournee, listTournees, saveTournee } from '../lib/db';
   import { AreaLoader } from '../lib/area';
   import { Recorder, uid } from '../lib/recorder';
   import { keepAwake, watchGPS, type GpsError } from '../lib/gps';
   import { label } from '../lib/addressIndex';
-  import { normalize } from '../lib/ban';
-  import type { Dot, Fix, Mode, Side, Tournee } from '../lib/types';
-  import type { LL } from '../lib/geo';
-  import MapView from '../components/MapView.svelte';
+  import { mergeFC, pinsFor, plainFeatures } from '../lib/mapdata';
+  import type { Fix, Mode, SegSide, Tournee } from '../lib/types';
+  import TourMap from '../components/TourMap.svelte';
   import Plaque from '../components/Plaque.svelte';
-  import SidePill from '../components/SidePill.svelte';
   import GpsHelp from '../components/GpsHelp.svelte';
   import ThemeButton from '../components/ThemeButton.svelte';
 
   let { tourneeId }: { tourneeId?: string } = $props();
 
-  // --- Préparation ---
   // svelte-ignore state_referenced_locally
   let phase = $state<'setup' | 'running'>(tourneeId ? 'running' : 'setup');
   let name = $state('');
   let mode = $state<Mode>('velo');
   let tournee: Tournee | null = null;
 
-  // --- Enregistrement ---
   let tick = $state(0);
   const bump = () => tick++;
   const area = new AreaLoader(bump);
@@ -34,12 +30,12 @@
   let paused = $state(false);
   let startedAt = Date.now();
   let now = $state(Date.now());
-  let picker = $state(false);
-  let query = $state('');
-  let chosen = $state<{ streetKey: string; street: string; city: string } | null>(null);
-  let sideMenu = $state(false);
+  let panelH = $state(0);
+  let saving = $state(false);
   let stopGps: (() => void) | null = null;
   let clock: ReturnType<typeof setInterval>;
+  let fixCount = 0;
+  let preview = $state<ReturnType<Recorder['preview']>>(null);
 
   onMount(async () => {
     if (tourneeId) {
@@ -69,7 +65,6 @@
     rec = new Recorder(area.index, mode);
     rec.segments = [...tournee.segments];
     rec.addrs = { ...tournee.addrs };
-    // les adresses déjà connues de la tournée servent même hors-ligne
     area.index.add(Object.values(tournee.addrs));
     phase = 'running';
     startedAt = Date.now();
@@ -79,10 +74,13 @@
   }
 
   function onFix(f: Fix) {
-    if (f.acc > 60) return; // trop imprécis
+    if (f.acc > 60) return;
     fix = f;
     area.ensure(f.lat, f.lon);
-    if (!paused && rec) rec.onFix(f);
+    if (paused || !rec) return bump();
+    rec.onFix(f);
+    // l'aperçu des adresses n'a pas besoin d'être recalculé à chaque position
+    if (++fixCount % 3 === 0) preview = rec.preview();
     bump();
   }
 
@@ -101,54 +99,29 @@
     await saveTournee(tournee);
   }
 
-  function chooseSide(side: Side) {
+  const SIDE_LABEL: Record<SegSide, string> = { pair: 'côté pair', impair: 'côté impair', both: 'les deux côtés', none: 'sans distribuer' };
+
+  function choose(side: SegSide) {
     if (!rec) return;
-    const target = chosen ?? rec.prompt;
-    if (!target) return;
+    if (!rec.pos) return toast("Attends d'avoir la position GPS");
     const prev = rec.active ? rec.finish() : null;
-    rec.start(target.streetKey, side);
-    chosen = null;
-    picker = false;
-    if (prev) {
-      toast(`${prev.street} : ${plural(prev.addrIds.length, 'adresse enregistrée', 'adresses enregistrées')}`);
-      persistDraft();
-    }
-    bump();
-  }
-
-  function finishSegment() {
-    if (!rec) return;
-    const s = rec.finish();
-    if (s) {
-      toast(`${s.street} : ${plural(s.addrIds.length, 'adresse enregistrée', 'adresses enregistrées')}`);
-      persistDraft();
-    } else toast('Aucune adresse captée, tronçon ignoré');
-    sideMenu = false;
-    bump();
-  }
-
-  function changeSide(side: Side) {
-    rec?.changeSide(side);
-    sideMenu = false;
-    bump();
-  }
-
-  function dismiss() {
-    rec?.dismiss();
-    chosen = null;
-    bump();
-  }
-
-  function undismiss() {
-    if (rec) rec.dismissed = null;
+    rec.start(side);
+    preview = rec.preview();
+    if (prev && prev.side !== 'none') {
+      const n = prev.addrIds.length;
+      toast(`Tronçon terminé : ${n} adresse${n > 1 ? 's' : ''}. Suite ${SIDE_LABEL[side]}.`, undefined, 3000);
+    } else toast(`À partir d'ici : ${SIDE_LABEL[side]}`, undefined, 2500);
+    if (prev) persistDraft();
     bump();
   }
 
   async function terminate() {
     if (!rec || !tournee) return;
-    rec.finish();
-    if (rec.segments.length === 0) {
-      if (!confirm("Aucun tronçon n'a été enregistré. Quitter quand même ?")) return;
+    saving = true;
+    rec.finalize();
+    if (!rec.segments.some((s) => s.side !== 'none')) {
+      saving = false;
+      if (!confirm("Aucun tronçon de distribution n'a été enregistré. Quitter quand même ?")) return;
       go({ name: 'home' });
       return;
     }
@@ -157,52 +130,33 @@
     go({ name: 'review', tourneeId: tournee.id });
   }
 
-  // --- Vues dérivées ---
+  // --- Vues ---
   const v = $derived.by(() => {
     tick;
     const r = rec;
-    const summary = r?.activeSummary() ?? null;
-    const p: LL | null = fix ? { lat: fix.lat, lon: fix.lon } : null;
-    const prompt = chosen ?? r?.prompt ?? null;
-    const promptInfo = prompt ? area.index.street(prompt.streetKey) : null;
-    let dots: Dot[] = [];
-    if (r?.active && summary) {
-      const on = new Set(summary.addrs.map((a) => a.id));
-      dots = (area.index.street(r.active.streetKey)?.addrs ?? []).map((a) => ({
-        lat: a.lat,
-        lon: a.lon,
-        kind: a.id === summary.lastId ? 'next' : on.has(a.id) ? 'on' : 'off',
-      }));
-    } else if (promptInfo) {
-      dots = promptInfo.addrs.map((a) => ({ lat: a.lat, lon: a.lon, kind: 'off' as const }));
-    }
+    const get = (id: string) => r?.addrs[id] ?? r?.index.byId.get(id);
+    const done = r ? plainFeatures(r.segments, get, 'done') : plainFeatures([], {});
+    const live =
+      r?.active && preview
+        ? plainFeatures(
+            [{ id: 'live', side: r.active.side, path: r.livePath(), addrIds: preview.addrIds, streetKey: '', street: '', city: '' }],
+            get,
+            'next',
+          )
+        : plainFeatures([], {});
+    const liveAddrs = (preview?.addrIds ?? []).map((id) => r!.index.byId.get(id)!).filter(Boolean);
     return {
-      p,
-      track: [...(tournee?.track ?? []), ...(r?.track ?? [])],
-      dots,
-      summary,
+      routes: mergeFC(done, live),
+      pins: pinsFor(liveAddrs, 'todo'),
+      pos: r?.pos ?? (fix ? { lat: fix.lat, lon: fix.lon } : null),
+      heading: r?.heading ?? null,
+      street: r?.street ?? null,
       active: r?.active ?? null,
-      prompt,
-      promptInfo,
-      detected: r?.detected ?? null,
-      dismissed: r?.dismissed ?? null,
-      segCount: r?.segments.length ?? 0,
-      areaStatus: area.status,
+      liveAddrs,
+      segCount: r?.segments.filter((s) => s.side !== 'none').length ?? 0,
       indexSize: area.index.size,
+      areaStatus: area.status,
     };
-  });
-
-  const nearby = $derived.by(() => {
-    tick;
-    if (!picker) return [];
-    const q = normalize(query);
-    if (q) {
-      return [...area.index.streets.values()]
-        .filter((s) => normalize(s.street).includes(q))
-        .slice(0, 30)
-        .map((s) => ({ streetKey: s.streetKey, street: s.street, city: s.city }));
-    }
-    return v.p ? area.index.candidates(v.p, 200).slice(0, 12) : [];
   });
 
   const elapsed = $derived.by(() => {
@@ -213,11 +167,12 @@
     return (h ? `${h}:${String(m).padStart(2, '0')}` : `${m}`) + `:${String(ss).padStart(2, '0')}`;
   });
 
-  const range = (info: { minNum: number; maxNum: number; city: string } | null | undefined) =>
-    info ? `Numéros ${info.minNum} à ${info.maxNum}${info.city ? ', ' + info.city : ''}` : '';
-
-  let mapRef: MapView | undefined = $state();
-  const plural = (n: number, one: string, many: string) => `${n} ${n > 1 ? many : one}`;
+  const BUTTONS: { side: SegSide; title: string; hint: string }[] = [
+    { side: 'pair', title: 'Pair', hint: '2 4 6' },
+    { side: 'impair', title: 'Impair', hint: '1 3 5' },
+    { side: 'both', title: 'Les deux', hint: '1 2 3' },
+    { side: 'none', title: 'Rien', hint: 'je passe' },
+  ];
 </script>
 
 {#if phase === 'setup'}
@@ -229,8 +184,9 @@
     </div>
     <h1 class="title">Enregistrer une tournée</h1>
     <p class="sub">
-      Fais ta tournée à vide, appli ouverte. En entrant dans une rue, choisis le côté que tu fais : pair,
-      impair ou les deux. Les adresses devant lesquelles tu passes s'ajoutent toutes seules.
+      Fais ta tournée à vide, appli ouverte. À chaque changement, touche ce que tu fais à partir de cet
+      endroit : pair, impair, les deux côtés, ou rien. Les adresses devant lesquelles tu passes sont
+      retrouvées toutes seules.
     </p>
 
     <label class="field">
@@ -252,9 +208,14 @@
   </main>
 {:else}
   <div class="rec">
-    <div class="map-wrap">
-      <MapView bind:this={mapRef} position={v.p} track={v.track} dots={v.dots} />
-    </div>
+    <TourMap
+      routes={v.routes}
+      stops={v.pins}
+      position={v.pos}
+      heading={v.heading}
+      zoom={mode === 'voiture' ? 17 : 18}
+      padBottom={panelH}
+    />
 
     <div class="top">
       <div class="pill-rec" class:paused>
@@ -270,110 +231,54 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="var(--ink)" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
         {/if}
       </button>
-      <button class="end" onclick={terminate}>Terminer</button>
+      <button class="end" onclick={terminate} disabled={saving}>{saving ? '…' : 'Terminer'}</button>
     </div>
-
     <div class="theme-slot"><ThemeButton /></div>
-    <button class="icon-btn recenter" aria-label="Recentrer la carte" onclick={() => mapRef?.recenter()}>
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="var(--email)" stroke-width="2.2" stroke-linecap="round" aria-hidden="true"><circle cx="12" cy="12" r="4" /><path d="M12 2v3M12 19v3M2 12h3M19 12h3" /></svg>
-    </button>
 
-    <section class="sheet">
+    <section class="panel" bind:clientHeight={panelH}>
       {#if gpsError}
         <GpsHelp error={gpsError} />
       {:else if !fix}
         <p class="state">Recherche de ta position GPS…</p>
-      {:else if paused}
-        <p class="state">Enregistrement en pause. Les adresses ne sont pas captées.</p>
-        <button class="btn btn-primary" onclick={() => (paused = false)}>Reprendre</button>
-      {:else if v.indexSize === 0 && v.areaStatus !== 'offline'}
-        <p class="state">Chargement des adresses du quartier…</p>
-      {:else if v.indexSize === 0}
-        <p class="state">
-          Pas de réseau : les adresses du quartier n'ont pas pu être chargées. Elles arriveront dès que le
-          réseau revient.
-        </p>
-      {:else if picker && !chosen}
-        <div class="row">
-          <h2 class="h2">Choisis la rue</h2>
-          <span class="spacer"></span>
-          <button class="link" onclick={() => ((picker = false), (query = ''))}>Annuler</button>
-        </div>
-        <input class="search" placeholder="Rechercher une rue" bind:value={query} autocomplete="off" />
-        <div class="streets">
-          {#each nearby as s (s.streetKey)}
-            <button class="street-row" onclick={() => (chosen = s)}>
-              <span>{s.street}</span>
-              {#if 'd' in s}<span class="sub small">{Math.round((s as { d: number }).d)} m</span>{/if}
-            </button>
+      {:else}
+        <div class="where">
+          {#if v.street}
+            <div class="grow"><Plaque text={v.street.street} size="s" upper /></div>
           {:else}
-            <p class="sub">Aucune rue trouvée.</p>
-          {/each}
-        </div>
-      {:else if v.prompt}
-        <p class="sub">{chosen ? 'Rue choisie' : 'Tu entres dans'}</p>
-        <Plaque text={v.prompt.street} size="l" upper />
-        <p class="sub center">{range(v.promptInfo)}</p>
-        <h2 class="h2">Quel côté fais-tu ?</h2>
-        <div class="sides">
-          <button class="side pair" onclick={() => chooseSide('pair')}><span class="s1">Pair</span><span class="s2">2 4 6</span></button>
-          <button class="side impair" onclick={() => chooseSide('impair')}><span class="s1">Impair</span><span class="s2">1 3 5</span></button>
-          <button class="side both" onclick={() => chooseSide('both')}><span class="s1">Les deux</span><span class="s2">1 2 3</span></button>
-        </div>
-        <div class="row">
-          {#if chosen}
-            <button class="btn btn-ghost grow" onclick={() => ((chosen = null), (picker = true))}>Autre rue</button>
-            <button class="btn btn-ghost" onclick={() => ((chosen = null), (picker = false))}>Annuler</button>
-          {:else if v.active}
-            <button class="btn btn-ghost grow" onclick={dismiss}>Je continue {v.active.street.charAt(0).toLowerCase() + v.active.street.slice(1)}</button>
-            <button class="btn btn-ghost" onclick={() => (picker = true)}>Autre rue</button>
-          {:else}
-            <button class="btn btn-ghost grow" onclick={dismiss}>Je ne distribue pas ici</button>
-            <button class="btn btn-ghost" onclick={() => (picker = true)}>Autre rue</button>
+            <p class="sub grow">{v.indexSize === 0 ? (v.areaStatus === 'offline' ? 'Pas de réseau : adresses non chargées' : 'Chargement des adresses…') : 'Aucune rue à proximité'}</p>
           {/if}
         </div>
-      {:else if v.active && v.summary}
-        <div class="row">
-          <div class="grow"><Plaque text={v.active.street} size="m" upper /></div>
-          <button class="pill-btn" onclick={() => (sideMenu = !sideMenu)} aria-expanded={sideMenu}>
-            <SidePill side={v.active.side} long />
-          </button>
+
+        <p class="status">
+          {#if paused}
+            En pause : le trajet n'est pas enregistré.
+          {:else if !v.active}
+            Touche ce que tu fais à partir d'ici.
+          {:else if v.active.side === 'none'}
+            Passage sans distribution{v.segCount ? `, ${v.segCount} tronçon${v.segCount > 1 ? 's' : ''} enregistré${v.segCount > 1 ? 's' : ''}` : ''}.
+          {:else}
+            <strong class="cond n">{v.liveAddrs.length} adresse{v.liveAddrs.length > 1 ? 's' : ''}</strong>
+            <span class="sub">{SIDE_LABEL[v.active.side]}{v.liveAddrs.length ? `, dernière : ${label(v.liveAddrs[v.liveAddrs.length - 1])}` : ''}</span>
+          {/if}
+        </p>
+
+        <div class="sides">
+          {#each BUTTONS as b (b.side)}
+            <button
+              class="side {b.side}"
+              class:on={v.active?.side === b.side}
+              aria-pressed={v.active?.side === b.side}
+              disabled={paused}
+              onclick={() => choose(b.side)}
+            >
+              <span class="s1">{b.title}</span>
+              <span class="s2">{b.hint}</span>
+            </button>
+          {/each}
         </div>
-        {#if sideMenu}
-          <div class="sides small-sides">
-            <button class="side pair" onclick={() => changeSide('pair')}><span class="s1">Pair</span></button>
-            <button class="side impair" onclick={() => changeSide('impair')}><span class="s1">Impair</span></button>
-            <button class="side both" onclick={() => changeSide('both')}><span class="s1">Les deux</span></button>
-          </div>
+        {#if v.active}
+          <p class="sub small center">Touche à nouveau un bouton pour commencer un nouveau tronçon à partir d'ici.</p>
         {/if}
-        <div class="count">
-          <p class="cond n">{v.summary.count} adresse{v.summary.count > 1 ? 's' : ''}</p>
-          {#if v.summary.min !== null}<p class="sub">du {v.summary.min} au {v.summary.max}</p>{/if}
-        </div>
-        {#if v.summary.count}
-          <div class="chips">
-            {#each v.summary.addrs.slice(-14) as a (a.id)}
-              <Plaque text={label(a)} size="chip" ring={a.id === v.summary.lastId} />
-            {/each}
-          </div>
-        {:else}
-          <p class="sub">Avance devant les boîtes : les numéros apparaissent ici.</p>
-        {/if}
-        <p class="sub hint">Tu feras la suite plus tard ? Termine le tronçon ici, le reste de la rue restera libre.</p>
-        <button class="btn btn-primary" onclick={finishSegment}>Fin du tronçon</button>
-      {:else if v.detected && v.dismissed === v.detected.streetKey}
-        <Plaque text={v.detected.street} size="m" upper />
-        <p class="sub center">Pas de distribution ici. Avance jusqu'à la prochaine rue.</p>
-        <div class="row">
-          <button class="btn btn-ghost grow" onclick={undismiss}>Je distribue ici</button>
-          <button class="btn btn-ghost" onclick={() => (picker = true)}>Autre rue</button>
-        </div>
-      {:else}
-        <p class="state">Avance jusqu'à la première rue de ta tournée.</p>
-        <button class="btn btn-ghost" onclick={() => (picker = true)}>Choisir la rue</button>
-      {/if}
-      {#if v.segCount > 0 && !picker}
-        <p class="sub small center">{v.segCount} tronçon{v.segCount > 1 ? 's' : ''} enregistré{v.segCount > 1 ? 's' : ''}</p>
       {/if}
     </section>
   </div>
@@ -392,8 +297,7 @@
     margin-bottom: 8px;
     padding: 0;
   }
-  .setup input,
-  .search {
+  .setup input {
     height: 56px;
     border-radius: 16px;
     border: 2px solid var(--line);
@@ -426,11 +330,6 @@
     inset: 0;
     background: var(--map);
   }
-  .map-wrap {
-    position: absolute;
-    inset: 0 0 auto 0;
-    height: 62dvh;
-  }
   .top {
     position: absolute;
     top: calc(var(--safe-top) + 12px);
@@ -439,7 +338,13 @@
     display: flex;
     align-items: center;
     gap: 8px;
-    z-index: 1100;
+    z-index: 30;
+  }
+  .theme-slot {
+    position: absolute;
+    left: 14px;
+    top: calc(var(--safe-top) + 68px);
+    z-index: 30;
   }
   .pill-rec {
     display: flex;
@@ -485,58 +390,58 @@
     font-weight: 600;
     font-size: 15px;
   }
-  .recenter {
+  .panel {
     position: absolute;
-    right: 14px;
-    top: calc(var(--safe-top) + 68px);
-    z-index: 1100;
-  }
-  .theme-slot {
-    position: absolute;
-    left: 14px;
-    top: calc(var(--safe-top) + 68px);
-    z-index: 1100;
-  }
-  .sheet {
-    position: absolute;
-    z-index: 1100 !important;
     left: 0;
     right: 0;
     bottom: 0;
-    max-height: 78dvh;
-    overflow-y: auto;
+    z-index: 30;
     background: var(--card);
-    border-radius: 28px 28px 0 0;
-    padding: 20px 20px calc(var(--safe-bottom) + 22px);
+    border-radius: 26px 26px 0 0;
+    padding: 16px 16px calc(var(--safe-bottom) + 16px);
     display: flex;
     flex-direction: column;
-    gap: 14px;
-    z-index: 600;
-    box-shadow: 0 -6px 24px rgba(21, 35, 63, 0.12);
+    gap: 12px;
+    box-shadow: 0 -6px 24px rgba(21, 35, 63, 0.14);
   }
   .state {
     font-size: 18px;
     font-weight: 500;
-    line-height: 1.4;
   }
-  .h2 {
-    font: 700 26px/1.1 var(--cond);
+  .where {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    min-height: 40px;
   }
-  .center {
-    text-align: center;
+  .grow {
+    flex: 1;
+    min-width: 0;
+    display: flex;
   }
-  .small {
-    font-size: 14px;
+  .status {
+    display: flex;
+    align-items: baseline;
+    gap: 10px;
+    flex-wrap: wrap;
+    font-size: 17px;
+    font-weight: 500;
+    min-height: 34px;
+  }
+  .n {
+    font-weight: 700;
+    font-size: 30px;
+    line-height: 1;
   }
   .sides {
     display: grid;
-    grid-template-columns: repeat(3, minmax(0, 1fr));
-    gap: 10px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 8px;
   }
   .side {
-    height: 104px;
+    height: 92px;
     border: 0;
-    border-radius: 20px;
+    border-radius: 18px;
     color: #fff;
     display: flex;
     flex-direction: column;
@@ -544,26 +449,27 @@
     justify-content: center;
     gap: 6px;
     font-family: var(--cond);
+    transition:
+      transform 0.08s,
+      box-shadow 0.15s;
   }
-  .side:active {
-    transform: scale(0.96);
+  .side:active:not(:disabled) {
+    transform: scale(0.95);
   }
-  .small-sides .side {
-    height: 56px;
-    border-radius: 14px;
+  .side.on {
+    box-shadow:
+      0 0 0 4px var(--card),
+      0 0 0 8px var(--yellow);
   }
   .s1 {
     font-weight: 700;
-    font-size: 28px;
+    font-size: 24px;
     line-height: 1;
-  }
-  .small-sides .s1 {
-    font-size: 22px;
   }
   .s2 {
     font-weight: 500;
-    font-size: 17px;
-    letter-spacing: 0.12em;
+    font-size: 15px;
+    letter-spacing: 0.08em;
     opacity: 0.85;
   }
   .side.pair {
@@ -575,51 +481,21 @@
   .side.both {
     background: var(--solid);
   }
-  .grow {
-    flex: 1;
-    min-width: 0;
-  }
-  .pill-btn {
-    border: 0;
-    background: none;
-    padding: 0;
-  }
-  .count {
-    display: flex;
-    align-items: baseline;
-    justify-content: space-between;
-  }
-  .n {
-    font-weight: 700;
-    font-size: 44px;
-    line-height: 1;
-  }
-  .chips {
-    display: flex;
-    flex-wrap: wrap;
-    gap: 8px;
-  }
-  .hint {
-    font-size: 15px;
-  }
-  .streets {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-height: 40dvh;
-    overflow-y: auto;
-  }
-  .street-row {
-    display: flex;
-    justify-content: space-between;
-    align-items: center;
-    min-height: 54px;
-    padding: 0 16px;
-    border-radius: 14px;
-    border: 0;
+  .side.none {
     background: var(--ground);
-    font-weight: 600;
-    font-size: 17px;
-    text-align: left;
+    color: var(--ink);
+    box-shadow: inset 0 0 0 2px var(--line);
+  }
+  .side.none.on {
+    box-shadow:
+      inset 0 0 0 2px var(--line),
+      0 0 0 4px var(--card),
+      0 0 0 8px var(--yellow);
+  }
+  .small {
+    font-size: 13px;
+  }
+  .center {
+    text-align: center;
   }
 </style>

@@ -3,11 +3,15 @@
   import { go, setCurrent, toast } from '../lib/app.svelte';
   import { deleteTournee, getTournee, saveTournee } from '../lib/db';
   import { exportTournees } from '../lib/backup';
-  import { label, matchesSide, sortByNum } from '../lib/addressIndex';
-  import type { Addr, Mode, Segment, Side, Tournee } from '../lib/types';
+  import { AddressIndex, isEven, label, sortByNum } from '../lib/addressIndex';
+  import { assignAll, assignSegment, migrateSegment } from '../lib/assign';
+  import { cellsAround, loadCell } from '../lib/ban';
+  import { lineLength, projectDetailed } from '../lib/geo';
+  import { pinsFor, plainFeatures } from '../lib/mapdata';
+  import type { Addr, Mode, Segment, SegSide, Side, Tournee } from '../lib/types';
   import Plaque from '../components/Plaque.svelte';
   import SidePill from '../components/SidePill.svelte';
-  import MapView from '../components/MapView.svelte';
+  import TourMap from '../components/TourMap.svelte';
   import NoteSheet from '../components/NoteSheet.svelte';
 
   let { tourneeId }: { tourneeId: string } = $props();
@@ -41,12 +45,29 @@
 
   const total = $derived(t ? new Set(t.segments.flatMap((s) => s.addrIds)).size : 0);
 
+  const parityOk = (a: Addr, side: SegSide) =>
+    side === 'both' || (side === 'pair' ? isEven(a) : side === 'impair' ? !isEven(a) : false);
+
+  /** Numéros proposés pour un tronçon : ceux des rues qu'il traverse, du bon côté. */
   function streetAddrs(seg: Segment): Addr[] {
     if (!t) return [];
+    const keys = new Set([seg.streetKey, ...seg.addrIds.map((id) => t!.addrs[id]?.streetKey)]);
     return Object.values(t.addrs)
-      .filter((a) => a.streetKey === seg.streetKey && matchesSide(a, seg.side))
-      .sort(sortByNum);
+      .filter((a) => keys.has(a.streetKey) && parityOk(a, seg.side))
+      .sort((a, b) => a.street.localeCompare(b.street) || sortByNum(a, b));
   }
+
+  function title(seg: Segment) {
+    const st = seg.streets?.length ? seg.streets : [seg.street];
+    return st.length > 1 ? `${st[0]}, puis ${st.length === 2 ? st[1] : `${st.length - 1} autres rues`}` : st[0] || 'Rue inconnue';
+  }
+
+  const indexOf = (tt: Tournee) => {
+    const idx = new AddressIndex();
+    idx.add(Object.values(tt.addrs));
+    return idx;
+  };
+  const takenExcept = (seg: Segment) => new Set(t!.segments.filter((s) => s !== seg).flatMap((s) => s.addrIds));
 
   function summary(seg: Segment) {
     const nums = seg.addrIds.map((id) => t!.addrs[id]?.num).filter((n) => n !== undefined);
@@ -62,9 +83,11 @@
     const i = seg.addrIds.indexOf(a.id);
     if (i >= 0) seg.addrIds.splice(i, 1);
     else {
+      // on l'insère à sa place le long du tracé
+      const path = migrateSegment(seg, t!.addrs).path ?? [];
+      const pos = (x: Addr) => (path.length >= 2 ? projectDetailed(x, path).along : x.num);
       const list = seg.addrIds.map((id) => t!.addrs[id]);
-      const dir = list.length >= 2 ? Math.sign(list[list.length - 1].num - list[0].num) || 1 : 1;
-      let at = list.findIndex((b) => (b.num - a.num) * dir > 0);
+      let at = list.findIndex((b) => pos(b) > pos(a));
       if (at < 0) at = list.length;
       seg.addrIds.splice(at, 0, a.id);
     }
@@ -72,22 +95,50 @@
   }
 
   function setSide(seg: Segment, side: Side) {
-    if (seg.side === side) return;
-    const cur = seg.addrIds.map((id) => t!.addrs[id]).filter(Boolean);
-    const lo = cur.length ? Math.min(...cur.map((a) => a.num)) : -Infinity;
-    const hi = cur.length ? Math.max(...cur.map((a) => a.num)) : Infinity;
-    const dir = cur.length >= 2 ? Math.sign(cur[cur.length - 1].num - cur[0].num) || 1 : 1;
+    if (!t || seg.side === side) return;
     seg.side = side;
-    const next = Object.values(t!.addrs)
-      .filter((a) => a.streetKey === seg.streetKey && matchesSide(a, side) && a.num >= lo - 1 && a.num <= hi + 1)
-      .sort((a, b) => sortByNum(a, b) * dir);
-    seg.addrIds = next.map((a) => a.id);
+    if (seg.raw && seg.raw.length >= 2) {
+      const r = assignSegment(side, seg.raw, indexOf(t), takenExcept(seg));
+      Object.assign(seg, r);
+    } else {
+      const keys = new Set([seg.streetKey, ...seg.addrIds.map((id) => t!.addrs[id]?.streetKey)]);
+      const path = migrateSegment(seg, t.addrs).path ?? [];
+      seg.addrIds = Object.values(t.addrs)
+        .filter((a) => keys.has(a.streetKey) && parityOk(a, side))
+        .sort((a, b) => (path.length >= 2 ? projectDetailed(a, path).along - projectDetailed(b, path).along : sortByNum(a, b)))
+        .map((a) => a.id);
+    }
     save();
   }
 
-  function reverse(seg: Segment) {
-    seg.addrIds.reverse();
+  // Recalcule toutes les adresses à partir des tracés (utile si le réseau manquait à l'enregistrement).
+  let recomputing = $state(false);
+  async function recompute() {
+    if (!t) return;
+    recomputing = true;
+    const idx = indexOf(t);
+    const cells = new Set<string>();
+    for (const s of t.segments)
+      for (const [k, p] of (s.raw ?? []).entries()) if (k % 20 === 0) cellsAround(p.lat, p.lon).forEach((c) => cells.add(c));
+    let offline = false;
+    await Promise.all(
+      [...cells].map(async (c) => {
+        const addrs = await loadCell(c);
+        if (addrs) idx.add(addrs);
+        else offline = true;
+      }),
+    );
+    const before = new Set(t.segments.flatMap((s) => s.addrIds)).size;
+    t.segments = assignAll($state.snapshot(t.segments) as Segment[], idx);
+    for (const seg of t.segments)
+      for (const id of seg.addrIds) {
+        const k = idx.byId.get(id)?.streetKey;
+        if (k) for (const a of idx.street(k)?.addrs ?? []) t.addrs[a.id] = a;
+      }
     save();
+    recomputing = false;
+    const after = new Set(t.segments.flatMap((s) => s.addrIds)).size;
+    toast(`${after} adresses (avant : ${before})${offline ? '. Pas de réseau pour une partie du quartier.' : ''}`);
   }
 
   function move(i: number, d: number) {
@@ -126,9 +177,11 @@
     go({ name: 'home' });
   }
 
-  const mapDots = $derived(
-    t ? t.segments.flatMap((s) => s.addrIds.map((id) => t!.addrs[id]).filter(Boolean)).map((a) => ({ lat: a.lat, lon: a.lon, kind: 'on' as const })) : [],
+  const mapRoutes = $derived(t ? plainFeatures(t.segments, t.addrs) : plainFeatures([], {}));
+  const mapPins = $derived(
+    t ? pinsFor(t.segments.flatMap((s) => s.addrIds.map((id) => t!.addrs[id]).filter(Boolean)), 'todo', t.notes) : [],
   );
+  const distSegs = $derived(t ? t.segments.filter((s) => s.side !== 'none') : []);
 </script>
 
 {#if t}
@@ -142,7 +195,7 @@
     </div>
 
     <input class="name title" bind:value={t.name} onchange={save} aria-label="Nom de la tournée" />
-    <p class="sub">{t.segments.length} tronçon{t.segments.length > 1 ? 's' : ''}, {total} adresses. Touche un tronçon pour le corriger.</p>
+    <p class="sub">{distSegs.length} tronçon{distSegs.length > 1 ? 's' : ''}, {total} adresses. Touche un tronçon pour le corriger.</p>
 
     <div class="seg3" role="group" aria-label="Mode de déplacement">
       {#each [['pied', 'À pied'], ['velo', 'Vélo'], ['voiture', 'Voiture']] as [val, lab] (val)}
@@ -152,18 +205,24 @@
 
     {#if showMap}
       <div class="map card">
-        <MapView track={t.track} dots={mapDots} fit follow={false} />
+        <TourMap routes={mapRoutes} stops={mapPins} followMode={false} padTop={20} />
       </div>
     {:else}
       <ol class="segs">
         {#each t.segments as seg, i (seg.id)}
+          {#if seg.side === 'none'}
+            <li class="passage">
+              <span class="sub small">Passage sans distribuer{seg.path ? `, ${Math.round(lineLength(seg.path) / 10) * 10} m` : ''}</span>
+              <button class="link small" onclick={() => remove(i)}>Retirer</button>
+            </li>
+          {:else}
           <li class="card segc" class:open={open === seg.id}>
             <button class="seg-head" onclick={() => (open = open === seg.id ? null : seg.id)} aria-expanded={open === seg.id}>
               <span class="ord cond">{i + 1}</span>
               <span class="seg-main">
                 <span class="row">
-                  <span class="grow"><Plaque text={seg.street} size="s" upper /></span>
-                  <SidePill side={seg.side} />
+                  <span class="grow"><Plaque text={title(seg)} size="s" upper /></span>
+                  <SidePill side={seg.side as Side} />
                 </span>
                 <span class="sub small">{summary(seg)}</span>
               </span>
@@ -197,7 +256,6 @@
                   {/each}
                 </div>
                 <div class="actions">
-                  <button class="btn btn-ghost" onclick={() => reverse(seg)}>Inverser le sens</button>
                   <button class="btn btn-ghost" onclick={() => move(i, -1)} disabled={i === 0}>Monter</button>
                   <button class="btn btn-ghost" onclick={() => move(i, 1)} disabled={i === t.segments.length - 1}>Descendre</button>
                   <button class="btn btn-ghost danger" onclick={() => remove(i)}>Supprimer</button>
@@ -205,11 +263,13 @@
               </div>
             {/if}
           </li>
+          {/if}
         {/each}
       </ol>
     {/if}
 
     <button class="btn btn-ghost" onclick={() => go({ name: 'record', tourneeId: t!.id })}>Continuer l'enregistrement</button>
+    <button class="btn btn-ghost" onclick={recompute} disabled={recomputing}>{recomputing ? 'Calcul en cours…' : 'Recalculer les adresses depuis le tracé'}</button>
     <button class="btn btn-primary" onclick={() => { setCurrent(t!.id); go({ name: 'home' }); }}>C'est bon</button>
     <div class="foot">
       <button class="link" onclick={() => exportTournees(t!)}>Envoyer cette tournée</button>
@@ -265,7 +325,15 @@
     background: var(--solid);
     color: #fff;
   }
+  .passage {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 0 8px 0 40px;
+    min-height: 36px;
+  }
   .map {
+    position: relative;
     height: 60dvh;
     padding: 0;
     overflow: hidden;
@@ -383,7 +451,7 @@
   }
   .actions {
     display: grid;
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-columns: repeat(3, minmax(0, 1fr));
     gap: 8px;
   }
   .actions .btn {
