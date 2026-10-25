@@ -87,22 +87,8 @@
     }
   }
 
-  // Toucher un numéro sur la carte : ouvre sa fiche (fait / à faire, note).
+  // Toucher un numéro sur la carte : ouvre sa note. Rien à valider, tout avance seul.
   let sheetAddr = $state<Addr | null>(null);
-
-  function toggleDone(a: Addr) {
-    const n = new Set(done);
-    const wasDone = n.has(a.id);
-    if (wasDone) n.delete(a.id);
-    else n.add(a.id);
-    guide?.forget(a.id);
-    done = n;
-    save();
-    toast(`${label(a)} ${a.street} : ${wasDone ? 'remis à faire' : 'marqué fait'}`, {
-      label: 'Annuler',
-      run: () => toggleDone(a),
-    });
-  }
 
   function onStopTap(a: Addr) {
     sheetAddr = a;
@@ -208,15 +194,6 @@
       note={t.notes?.[a.id] ?? ''}
       onSave={(text) => saveNote(a, text)}
       onClose={() => (sheetAddr = null)}
-      action={stops.some((s) => s.id === a.id)
-        ? {
-            label: done.has(a.id) ? 'Remettre à faire' : 'Marquer comme fait',
-            run: () => {
-              toggleDone(a);
-              sheetAddr = null;
-            },
-          }
-        : null}
     />
   {/if}
 {/if}
