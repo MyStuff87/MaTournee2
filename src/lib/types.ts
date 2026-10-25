@@ -3,6 +3,11 @@ export interface LL {
   lon: number;
 }
 
+/** Point de trajet ; m = position placée à la main (« Je suis ici »). */
+export interface RawPt extends LL {
+  m?: 1;
+}
+
 export type Side = 'pair' | 'impair' | 'both';
 export type Mode = 'pied' | 'velo' | 'voiture';
 
@@ -28,7 +33,7 @@ export interface Segment {
   /** tracé lissé et simplifié (lignes droites), dans le sens de passage */
   path?: LL[];
   /** positions lissées brutes, pour recalculer les adresses */
-  raw?: LL[];
+  raw?: RawPt[];
   /** adresses dans l'ordre de passage */
   addrIds: string[];
   /** rue principale (affichage) */

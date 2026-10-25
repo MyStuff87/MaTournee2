@@ -2,6 +2,8 @@
 // le facteur est passé, et prépare les lignes à dessiner.
 import type { Addr, LL, Segment, SegSide } from './types';
 import { AddressIndex, isEven, sortByNum } from './addressIndex';
+import { RoadIndex } from './roads';
+import { matchToRoads } from './match';
 import { bearing, dist, projectDetailed, sideOf, simplify } from './geo';
 
 /** Distance max entre le trajet et une adresse « devant laquelle on passe ». */
@@ -25,14 +27,16 @@ export function straighten(raw: LL[]): LL[] {
   return raw.length < 2 ? raw.slice() : simplify(raw, STRAIGHTEN);
 }
 
-export function assignSegment(side: SegSide, raw: LL[], index: AddressIndex, taken: Set<string>): Assigned {
-  const path = straighten(raw);
+export function assignSegment(side: SegSide, raw: LL[], index: AddressIndex, taken: Set<string>, roads?: RoadIndex): Assigned {
+  const m = roads && roads.size ? matchToRoads(raw, roads) : null;
+  const path = m ? m.path : straighten(raw);
   const empty = (): Assigned => {
     const mid = raw[Math.floor(raw.length / 2)];
     const c = mid ? index.candidates(mid, 60)[0] : undefined;
     return { path, addrIds: [], streetKey: c?.streetKey ?? '', street: c?.street ?? '', city: c?.city ?? '', streets: c ? [c.street] : [] };
   };
   if (side === 'none' || path.length < 2) return empty();
+  if (m && roads) return assignByRoads(side, path, m.edges, index, taken, roads, empty);
 
   // 1. Adresses proches du trajet, du bon côté (pair / impair), longées.
   const cands = new Map<string, Addr>();
@@ -122,15 +126,72 @@ function axisAngle(a: number, b: number): number {
   return Math.min(d, 180 - d);
 }
 
+/**
+ * Rattachement par la rue : chaque adresse est accrochée au tronçon de rue
+ * qui porte son nom ; elle est prise si ce morceau de rue a été parcouru.
+ * Aucune dépendance à la précision du GPS.
+ */
+function assignByRoads(
+  side: SegSide,
+  path: LL[],
+  edges: Set<string>,
+  index: AddressIndex,
+  taken: Set<string>,
+  roads: RoadIndex,
+  empty: () => Assigned,
+): Assigned {
+  const cands = new Map<string, Addr>();
+  let last: LL | null = null;
+  for (const p of densify(path, 15)) {
+    if (last && dist(last, p) < 12) continue;
+    last = p;
+    for (const a of index.near(p, 90)) if (parityOk(a, side) && !taken.has(a.id)) cands.set(a.id, a);
+  }
+  const along = new Map<string, number>();
+  const chosen: Addr[] = [];
+  for (const a of cands.values()) {
+    const home = roads.homeEdge(a, a.street);
+    if (!home || !edges.has(home.edge.id)) continue;
+    const pr = projectDetailed(home.p, path);
+    if (pr.d > 4) continue; // ce bout de rue n'a pas été parcouru
+    chosen.push(a);
+    along.set(a.id, pr.along);
+  }
+  if (!chosen.length) return empty();
+  chosen.sort((a, b) => along.get(a.id)! - along.get(b.id)! || sortByNum(a, b));
+  const counts = new Map<string, number>();
+  const streets: string[] = [];
+  for (const a of chosen) {
+    counts.set(a.streetKey, (counts.get(a.streetKey) ?? 0) + 1);
+    if (!streets.includes(a.street)) streets.push(a.street);
+  }
+  const mainKey = [...counts.entries()].sort((a, b) => b[1] - a[1])[0][0];
+  const main = chosen.find((a) => a.streetKey === mainKey)!;
+  return { path, addrIds: chosen.map((a) => a.id), streetKey: mainKey, street: main.street, city: main.city, streets };
+}
+
+/** Points intermédiaires tous les `step` mètres. */
+function densify(line: LL[], step: number): LL[] {
+  const out: LL[] = [];
+  for (let i = 0; i < line.length - 1; i++) {
+    const a = line[i];
+    const b = line[i + 1];
+    const n = Math.max(1, Math.ceil(dist(a, b) / step));
+    for (let k = 0; k < n; k++) out.push({ lat: a.lat + ((b.lat - a.lat) * k) / n, lon: a.lon + ((b.lon - a.lon) * k) / n });
+  }
+  if (line.length) out.push(line[line.length - 1]);
+  return out;
+}
+
 /** Recalcule toutes les adresses d'une tournée, tronçon par tronçon, dans l'ordre. */
-export function assignAll(segments: Segment[], index: AddressIndex): Segment[] {
+export function assignAll(segments: Segment[], index: AddressIndex, roads?: RoadIndex): Segment[] {
   const taken = new Set<string>();
   return segments.map((s) => {
     if (!s.raw || s.raw.length < 2) {
       s.addrIds.forEach((id) => taken.add(id));
       return s;
     }
-    const r = assignSegment(s.side, s.raw, index, taken);
+    const r = assignSegment(s.side, s.raw, index, taken, roads);
     r.addrIds.forEach((id) => taken.add(id));
     return { ...s, ...r };
   });

@@ -6,6 +6,7 @@
   import { AddressIndex, isEven, label, sortByNum } from '../lib/addressIndex';
   import { assignAll, assignSegment, migrateSegment } from '../lib/assign';
   import { cellsAround, loadCell } from '../lib/ban';
+  import { loadRoadCell, RoadIndex } from '../lib/roads';
   import { lineLength, projectDetailed } from '../lib/geo';
   import { pinsFor, plainFeatures } from '../lib/mapdata';
   import type { Addr, Mode, Segment, SegSide, Side, Tournee } from '../lib/types';
@@ -94,12 +95,33 @@
     save();
   }
 
-  function setSide(seg: Segment, side: Side) {
+  /** Adresses et rues autour des tracés (depuis le téléphone, ou internet si besoin). */
+  async function loadArea(segs: Segment[]) {
+    const idx = indexOf(t!);
+    const roads = new RoadIndex();
+    const cells = new Set<string>();
+    for (const s of segs)
+      for (const [k, p] of (s.raw ?? s.path ?? []).entries()) if (k % 20 === 0) cellsAround(p.lat, p.lon).forEach((c) => cells.add(c));
+    let offline = false;
+    await Promise.all(
+      [...cells].map(async (c) => {
+        const [a, r] = await Promise.all([loadCell(c), loadRoadCell(c)]);
+        if (a) idx.add(a);
+        else offline = true;
+        if (r) roads.add(r);
+      }),
+    );
+    return { idx, roads, offline };
+  }
+
+  async function setSide(seg: Segment, side: Side) {
     if (!t || seg.side === side) return;
     seg.side = side;
     if (seg.raw && seg.raw.length >= 2) {
-      const r = assignSegment(side, seg.raw, indexOf(t), takenExcept(seg));
+      const { idx, roads } = await loadArea([seg]);
+      const r = assignSegment(side, seg.raw, idx, takenExcept(seg), roads);
       Object.assign(seg, r);
+      keepStreets(idx, seg);
     } else {
       const keys = new Set([seg.streetKey, ...seg.addrIds.map((id) => t!.addrs[id]?.streetKey)]);
       const path = migrateSegment(seg, t.addrs).path ?? [];
@@ -111,30 +133,22 @@
     save();
   }
 
+  function keepStreets(idx: AddressIndex, seg: Segment) {
+    for (const id of seg.addrIds) {
+      const k = idx.byId.get(id)?.streetKey;
+      if (k) for (const a of idx.street(k)?.addrs ?? []) t!.addrs[a.id] = a;
+    }
+  }
+
   // Recalcule toutes les adresses à partir des tracés (utile si le réseau manquait à l'enregistrement).
   let recomputing = $state(false);
   async function recompute() {
     if (!t) return;
     recomputing = true;
-    const idx = indexOf(t);
-    const cells = new Set<string>();
-    for (const s of t.segments)
-      for (const [k, p] of (s.raw ?? []).entries()) if (k % 20 === 0) cellsAround(p.lat, p.lon).forEach((c) => cells.add(c));
-    let offline = false;
-    await Promise.all(
-      [...cells].map(async (c) => {
-        const addrs = await loadCell(c);
-        if (addrs) idx.add(addrs);
-        else offline = true;
-      }),
-    );
+    const { idx, roads, offline } = await loadArea(t.segments);
     const before = new Set(t.segments.flatMap((s) => s.addrIds)).size;
-    t.segments = assignAll($state.snapshot(t.segments) as Segment[], idx);
-    for (const seg of t.segments)
-      for (const id of seg.addrIds) {
-        const k = idx.byId.get(id)?.streetKey;
-        if (k) for (const a of idx.street(k)?.addrs ?? []) t.addrs[a.id] = a;
-      }
+    t.segments = assignAll($state.snapshot(t.segments) as Segment[], idx, roads);
+    for (const seg of t.segments) keepStreets(idx, seg);
     save();
     recomputing = false;
     const after = new Set(t.segments.flatMap((s) => s.addrIds)).size;
@@ -268,7 +282,10 @@
       </ol>
     {/if}
 
-    <button class="btn btn-ghost" onclick={() => go({ name: 'record', tourneeId: t!.id })}>Continuer l'enregistrement</button>
+    <div class="row two">
+      <button class="btn btn-ghost" onclick={() => go({ name: 'record', tourneeId: t!.id })}>Continuer à pied</button>
+      <button class="btn btn-ghost" onclick={() => go({ name: 'draw', tourneeId: t!.id })}>Continuer en traçant</button>
+    </div>
     <button class="btn btn-ghost" onclick={recompute} disabled={recomputing}>{recomputing ? 'Calcul en cours…' : 'Recalculer les adresses depuis le tracé'}</button>
     <button class="btn btn-primary" onclick={() => { setCurrent(t!.id); go({ name: 'home' }); }}>C'est bon</button>
     <div class="foot">
@@ -324,6 +341,9 @@
     border-color: var(--solid);
     background: var(--solid);
     color: #fff;
+  }
+  .two .btn {
+    flex: 1;
   }
   .passage {
     display: flex;

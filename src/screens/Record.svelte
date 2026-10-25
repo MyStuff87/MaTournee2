@@ -5,9 +5,8 @@
   import { AreaLoader } from '../lib/area';
   import { Recorder, uid } from '../lib/recorder';
   import { keepAwake, watchGPS, type GpsError } from '../lib/gps';
-  import { label } from '../lib/addressIndex';
-  import { mergeFC, pinsFor, plainFeatures } from '../lib/mapdata';
-  import type { Fix, Mode, SegSide, Tournee } from '../lib/types';
+  import { mergeFC, plainFeatures } from '../lib/mapdata';
+  import type { Fix, LL, Mode, SegSide, Tournee } from '../lib/types';
   import TourMap from '../components/TourMap.svelte';
   import Plaque from '../components/Plaque.svelte';
   import GpsHelp from '../components/GpsHelp.svelte';
@@ -35,7 +34,9 @@
   let stopGps: (() => void) | null = null;
   let clock: ReturnType<typeof setInterval>;
   let fixCount = 0;
-  let preview = $state<ReturnType<Recorder['preview']>>(null);
+  let live = $state<LL[]>([]);
+  let pinMode = $state(false);
+  let pin = $state<LL | null>(null);
 
   onMount(async () => {
     if (tourneeId) {
@@ -62,7 +63,7 @@
         track: [],
       };
     }
-    rec = new Recorder(area.index, mode);
+    rec = new Recorder(area.index, mode, area.roads);
     rec.segments = [...tournee.segments];
     rec.addrs = { ...tournee.addrs };
     area.index.add(Object.values(tournee.addrs));
@@ -79,8 +80,8 @@
     area.ensure(f.lat, f.lon);
     if (paused || !rec) return bump();
     rec.onFix(f);
-    // l'aperçu des adresses n'a pas besoin d'être recalculé à chaque position
-    if (++fixCount % 3 === 0) preview = rec.preview();
+    // le tracé collé aux rues est recalculé toutes les 3 positions
+    if (++fixCount % 3 === 0) live = rec.livePath();
     bump();
   }
 
@@ -106,18 +107,29 @@
     if (!rec.pos) return toast("Attends d'avoir la position GPS");
     const prev = rec.active ? rec.finish() : null;
     rec.start(side);
-    preview = rec.preview();
-    if (prev && prev.side !== 'none') {
-      const n = prev.addrIds.length;
-      toast(`Tronçon terminé : ${n} adresse${n > 1 ? 's' : ''}. Suite ${SIDE_LABEL[side]}.`, undefined, 3000);
-    } else toast(`À partir d'ici : ${SIDE_LABEL[side]}`, undefined, 2500);
+    live = [];
+    pin = null;
+    toast(`À partir d'ici : ${SIDE_LABEL[side]}`, undefined, 2500);
     if (prev) persistDraft();
+    bump();
+  }
+
+  // Corriger sa position en touchant la carte
+  function onMapTap(p: LL) {
+    if (!pinMode || !rec) return;
+    rec.setManual(p);
+    pin = p;
+    pinMode = false;
+    live = rec.livePath();
+    toast('Position corrigée', undefined, 2000);
     bump();
   }
 
   async function terminate() {
     if (!rec || !tournee) return;
     saving = true;
+    // on attend la fin du chargement des rues et adresses du quartier
+    await area.idle(12000);
     rec.finalize();
     if (!rec.segments.some((s) => s.side !== 'none')) {
       saving = false;
@@ -136,23 +148,16 @@
     const r = rec;
     const get = (id: string) => r?.addrs[id] ?? r?.index.byId.get(id);
     const done = r ? plainFeatures(r.segments, get, 'done') : plainFeatures([], {});
-    const live =
-      r?.active && preview
-        ? plainFeatures(
-            [{ id: 'live', side: r.active.side, path: r.livePath(), addrIds: preview.addrIds, streetKey: '', street: '', city: '' }],
-            get,
-            'next',
-          )
+    const liveFC =
+      r?.active && live.length >= 2
+        ? plainFeatures([{ id: 'live', side: r.active.side, path: live, addrIds: [], streetKey: '', street: '', city: '' }], get, 'next')
         : plainFeatures([], {});
-    const liveAddrs = (preview?.addrIds ?? []).map((id) => r!.index.byId.get(id)!).filter(Boolean);
     return {
-      routes: mergeFC(done, live),
-      pins: pinsFor(liveAddrs, 'todo'),
+      routes: mergeFC(done, liveFC),
       pos: r?.pos ?? (fix ? { lat: fix.lat, lon: fix.lon } : null),
       heading: r?.heading ?? null,
       street: r?.street ?? null,
       active: r?.active ?? null,
-      liveAddrs,
       segCount: r?.segments.filter((s) => s.side !== 'none').length ?? 0,
       indexSize: area.index.size,
       areaStatus: area.status,
@@ -210,7 +215,8 @@
   <div class="rec">
     <TourMap
       routes={v.routes}
-      stops={v.pins}
+      {pin}
+      {onMapTap}
       position={v.pos}
       heading={v.heading}
       zoom={mode === 'voiture' ? 17 : 18}
@@ -231,7 +237,7 @@
           <svg width="18" height="18" viewBox="0 0 24 24" fill="var(--ink)" aria-hidden="true"><rect x="6" y="4" width="4" height="16" rx="1" /><rect x="14" y="4" width="4" height="16" rx="1" /></svg>
         {/if}
       </button>
-      <button class="end" onclick={terminate} disabled={saving}>{saving ? '…' : 'Terminer'}</button>
+      <button class="end" onclick={terminate} disabled={saving}>{saving ? 'Calcul…' : 'Terminer'}</button>
     </div>
     <div class="theme-slot"><ThemeButton /></div>
 
@@ -250,15 +256,15 @@
         </div>
 
         <p class="status">
-          {#if paused}
+          {#if pinMode}
+            <strong>Touche la carte à l'endroit où tu es.</strong>
+          {:else if paused}
             En pause : le trajet n'est pas enregistré.
           {:else if !v.active}
             Touche ce que tu fais à partir d'ici.
-          {:else if v.active.side === 'none'}
-            Passage sans distribution{v.segCount ? `, ${v.segCount} tronçon${v.segCount > 1 ? 's' : ''} enregistré${v.segCount > 1 ? 's' : ''}` : ''}.
           {:else}
-            <strong class="cond n">{v.liveAddrs.length} adresse{v.liveAddrs.length > 1 ? 's' : ''}</strong>
-            <span class="sub">{SIDE_LABEL[v.active.side]}{v.liveAddrs.length ? `, dernière : ${label(v.liveAddrs[v.liveAddrs.length - 1])}` : ''}</span>
+            <strong class="cond n">Tronçon {v.segCount + (v.active.side === 'none' ? 0 : 1)}</strong>
+            <span class="sub">{SIDE_LABEL[v.active.side]}. Les adresses seront ajoutées à la fin.</span>
           {/if}
         </p>
 
@@ -276,9 +282,10 @@
             </button>
           {/each}
         </div>
-        {#if v.active}
-          <p class="sub small center">Touche à nouveau un bouton pour commencer un nouveau tronçon à partir d'ici.</p>
-        {/if}
+        <button class="pinbtn" class:on={pinMode} onclick={() => (pinMode = !pinMode)}>
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M12 21s-7-6.2-7-11.5A7 7 0 0 1 19 9.5C19 14.8 12 21 12 21z" /><circle cx="12" cy="9.5" r="2.5" /></svg>
+          {pinMode ? 'Annuler' : 'Le GPS se trompe ? Corrige ta position sur la carte'}
+        </button>
       {/if}
     </section>
   </div>
@@ -491,6 +498,24 @@
       inset 0 0 0 2px var(--line),
       0 0 0 4px var(--card),
       0 0 0 8px var(--yellow);
+  }
+  .pinbtn {
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    min-height: 44px;
+    border: 0;
+    border-radius: 14px;
+    background: var(--ground);
+    color: var(--link);
+    font-weight: 600;
+    font-size: 15px;
+    padding: 0 12px;
+  }
+  .pinbtn.on {
+    background: var(--yellow);
+    color: var(--on-yellow);
   }
   .small {
     font-size: 13px;

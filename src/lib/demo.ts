@@ -102,3 +102,20 @@ export function startDemoGPS(onFix: (f: Fix) => void, speed = 1): () => void {
   }, 1000 / speed);
   return () => clearInterval(h);
 }
+
+/** Axes des rues du quartier fictif (pour coller les tracés et tracer à la main). */
+const ROADS: { id: string; name: string; pts: [number, number][] }[] = [
+  { id: 'r-moulin', name: 'Rue du Moulin', pts: [[-120, 0], [0, 0]] },
+  { id: 'r-til-1', name: 'Rue des Tilleuls', pts: [[0, 0], [150, 0]] },
+  { id: 'r-til-2', name: 'Rue des Tilleuls', pts: [[150, 0], [300, 0]] },
+  { id: 'r-pasteur', name: 'Rue Pasteur', pts: [[300, 0], [300, 240]] },
+  { id: 'r-parc', name: 'Avenue du Parc', pts: [[300, 240], [0, 240]] },
+  { id: 'r-jaures', name: 'Rue Jean Jaurès', pts: [[0, 0], [0, 240]] },
+  { id: 'r-lilas', name: 'Impasse des Lilas', pts: [[150, 0], [150, -130]] },
+];
+
+export function demoRoadsInBox(b: { minLat: number; maxLat: number; minLon: number; maxLon: number }) {
+  return ROADS.map((r) => ({ id: r.id, names: [r.name], coords: r.pts.map(([x, y]) => toLL(x, y)) })).filter((r) =>
+    r.coords.some((p) => p.lat >= b.minLat - 0.003 && p.lat < b.maxLat + 0.003 && p.lon >= b.minLon - 0.003 && p.lon < b.maxLon + 0.003),
+  );
+}

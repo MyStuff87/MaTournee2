@@ -63,6 +63,13 @@ export class PositionFilter {
     this.y = new Axis(q);
   }
 
+  /** Repart d'une position connue (posée à la main). */
+  reset(p: LL) {
+    this.origin = { lat: p.lat, lon: p.lon };
+    this.x.init(0);
+    this.y.init(0);
+  }
+
   update(f: Fix): LL {
     if (!this.origin) {
       this.origin = { lat: f.lat, lon: f.lon };

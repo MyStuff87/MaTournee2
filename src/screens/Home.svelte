@@ -99,7 +99,14 @@
       <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--impair)" stroke-width="2" aria-hidden="true"><circle cx="12" cy="12" r="9" /><circle cx="12" cy="12" r="4" fill="var(--impair)" /></svg>
       <span class="tile-t">
         <span class="cond tile-h">Enregistrer</span>
-        <span class="sub small">Une nouvelle tournée</span>
+        <span class="sub small">En faisant la tournée à vide</span>
+      </span>
+    </button>
+    <button class="tile wide" onclick={() => go({ name: 'draw' })}>
+      <svg width="34" height="34" viewBox="0 0 24 24" fill="none" stroke="var(--email)" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 19c4-1 3-7 8-8s5-6 8-7" /><circle cx="4" cy="19" r="2" fill="var(--email)" /><circle cx="20" cy="4" r="2" fill="var(--email)" /></svg>
+      <span class="tile-t">
+        <span class="cond tile-h">Tracer sur la carte</span>
+        <span class="sub small">Créer une tournée sans sortir</span>
       </span>
     </button>
   </div>
@@ -158,6 +165,15 @@
     justify-content: space-between;
     align-items: flex-start;
     text-align: left;
+  }
+  .tile.wide {
+    grid-column: 1 / -1;
+    height: auto;
+    min-height: 80px;
+    flex-direction: row;
+    align-items: center;
+    justify-content: flex-start;
+    gap: 16px;
   }
   .tile:active {
     transform: scale(0.98);

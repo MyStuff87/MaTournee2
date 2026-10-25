@@ -37,6 +37,14 @@
     padBottom?: number;
     padTop?: number;
     onStopTap?: (id: string) => void;
+    /** toucher la carte (hors numéros) */
+    onMapTap?: (p: LL) => void;
+    /** épingle posée par le facteur */
+    pin?: LL | null;
+    /** recadrer automatiquement sur la tournée (vue d'ensemble) */
+    autoFit?: boolean;
+    /** fin d'un déplacement de la carte */
+    onMoveEnd?: (center: LL, zoom: number) => void;
   }
   let {
     routes,
@@ -48,6 +56,10 @@
     padBottom = 0,
     padTop = 70,
     onStopTap,
+    onMapTap,
+    pin = null,
+    onMoveEnd,
+    autoFit = true,
   }: Props = $props();
 
   let el: HTMLDivElement;
@@ -106,6 +118,7 @@
       maxZoom: 20,
     });
     map.touchPitch.disable();
+    if (location.search.includes('demo')) (window as unknown as { __tmap: MlMap }).__tmap = map; // pour les tests
     const zoomClass = () => el.classList.toggle('far', map!.getZoom() < 17);
     map.on('zoom', zoomClass);
     zoomClass();
@@ -142,6 +155,11 @@
     const stopFollow = (e: { originalEvent?: unknown }) => {
       if (e.originalEvent) following = false;
     };
+    map.on('moveend', () => {
+      const c = map!.getCenter();
+      onMoveEnd?.({ lat: c.lat, lon: c.lng }, map!.getZoom());
+    });
+    map.on('click', (e) => onMapTap?.({ lat: e.lngLat.lat, lon: e.lngLat.lng }));
     map.on('dragstart', stopFollow);
     map.on('rotatestart', stopFollow);
     map.on('zoomstart', stopFollow);
@@ -164,7 +182,7 @@
   });
 
   function fitIfNeeded(force = false) {
-    if (!map || !ready || (!force && (followMode || fittedOnce))) return;
+    if (!map || !ready || (!force && (followMode || fittedOnce || !autoFit))) return;
     const b = new LngLatBounds();
     let n = 0;
     for (const f of routes.features)
@@ -223,7 +241,24 @@
     fitIfNeeded();
   });
 
+  // Épingle « je suis ici »
+  let pinMarker: Marker | undefined;
+  $effect(() => {
+    if (!map) return;
+    if (!pin) {
+      pinMarker?.remove();
+      pinMarker = undefined;
+      return;
+    }
+    if (!pinMarker) {
+      const el = document.createElement('div');
+      el.className = 'pin';
+      pinMarker = new Marker({ element: el, anchor: 'bottom' }).setLngLat([pin.lon, pin.lat]).addTo(map);
+    } else pinMarker.setLngLat([pin.lon, pin.lat]);
+  });
+
   // Passage en mode suivi : on se recadre sur la position, zoom compris.
+  // svelte-ignore state_referenced_locally
   let wasFollow = followMode;
   $effect(() => {
     if (followMode && !wasFollow) {
@@ -271,6 +306,10 @@
         duration: 500,
       });
     }
+  }
+
+  export function flyTo(p: LL, z = 17) {
+    map?.flyTo({ center: [p.lon, p.lat], zoom: z, bearing: 0, duration: 800 });
   }
 
   function northUp() {
@@ -386,6 +425,13 @@
     border-radius: 50%;
     background: var(--yellow);
     box-shadow: 0 0 0 2px var(--on-yellow);
+  }
+  .tmap :global(.pin) {
+    width: 30px;
+    height: 40px;
+    background: no-repeat center / contain
+      url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 30 40'%3E%3Cpath d='M15 39s13-14 13-24A13 13 0 0 0 2 15c0 10 13 24 13 24z' fill='%23ffc20e' stroke='%2315233f' stroke-width='2.5'/%3E%3Ccircle cx='15' cy='15' r='5' fill='%2315233f'/%3E%3C/svg%3E");
+    pointer-events: none;
   }
   .tmap :global(.me) {
     width: 64px;
